@@ -167,7 +167,7 @@ class Schulkonsole extends ManagableDomain {
             schoolClass: classId.toString(),
             isInternetLocked: false, isDeactivated: false, homeDirectory: "",
             password: config.schulkonsole?.initialPassword || "Start123!",
-            passwordPolicy: "1",
+            passwordPolicy: config.schulkonsole?.passwordPolicy || "2",
             email: `${identity.userId}@musterschule.schule.paedml`
         };
 

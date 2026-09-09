@@ -16,6 +16,12 @@
       "name": "schulkonsole",
       "titel": "Schulkonsole",
       "category": "students",
+      "actions": [
+        {
+          "name": "Kennwortablauf aufheben",
+          "run": "paedml-fix-password-expiration"
+        }
+      ],
       "color": "#00965E"
     },
     {
@@ -232,6 +238,13 @@
       "titel": "Matrix User-Datenbestand abgleichen",
       "description": "Vergleicht die lokalen MongoDB-Cache-Einträge mit den tatsächlichen Benutzerkonten auf dem Matrix-Server und bereinigt Ungültigkeiten.",
       "class": "MatrixReconcileUsersTask"
+    },
+    {
+      "name": "paedml-fix-password-expiration",
+      "titel": "Schulkonsole Kennwortablauf aufheben",
+      "description": "Hebt das Kennwortablaufdatum für Schüler*innen im Active Directory/LDAP auf.",
+      "class": "PaedmlFixPasswordExpirationTask",
+      "schedule": "10 7-18 * * *"
     }
   ]
 }
