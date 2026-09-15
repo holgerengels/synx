@@ -20,6 +20,8 @@ describe('Schulkonsole and SchulkonsoleTeacher Re-authentication', () => {
         Schulkonsole.authHeader = null;
         Schulkonsole.authTime = 0;
         Schulkonsole.isAuthenticating = false;
+        Schulkonsole.classes = {};
+        Schulkonsole.studentIds = {};
 
         SchulkonsoleTeacher.authHeader = null;
         SchulkonsoleTeacher.authTime = 0;
@@ -188,5 +190,114 @@ describe('Schulkonsole and SchulkonsoleTeacher Re-authentication', () => {
         expect(SchulkonsoleTeacher.authHeader).toBe('Bearer mock-teacher-token-2'); // Should have the new token
         expect(identities).toHaveLength(1);
         expect(identities[0].userId).toBe('JS');
+    });
+
+    it('should create missing class in lowercase on-the-fly when adding an identity', async () => {
+        let createdClassPayload = null;
+        let createdStudentPayload = null;
+
+        Schulkonsole.axiosInstance.defaults.adapter = jest.fn(async (config) => {
+            if (config.url === Schulkonsole.tokenURL) {
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: {},
+                    config,
+                    data: { token_type: 'Bearer', access_token: 'mock-token' }
+                };
+            }
+            if (config.url === `${Schulkonsole.apiURL}school/schoolClasses`) {
+                if (config.method.toLowerCase() === 'get') {
+                    return {
+                        status: 200,
+                        statusText: 'OK',
+                        headers: {},
+                        config,
+                        data: [] // No classes initially
+                    };
+                }
+                if (config.method.toLowerCase() === 'post') {
+                    createdClassPayload = JSON.parse(config.data);
+                    return {
+                        status: 200,
+                        statusText: 'OK',
+                        headers: {},
+                        config,
+                        data: { id: 42, name: createdClassPayload.name }
+                    };
+                }
+            }
+            if (config.url === `${Schulkonsole.apiURL}students`) {
+                createdStudentPayload = JSON.parse(config.data);
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: {},
+                    config,
+                    data: { id: 999 }
+                };
+            }
+            throw new Error(`Unexpected request to ${config.url}`);
+        });
+
+        await Schulkonsole.addIdentity({
+            userId: 'max123',
+            firstName: 'Max',
+            lastName: 'Mustermann',
+            clazz: '10A'
+        });
+
+        expect(createdClassPayload).not.toBeNull();
+        expect(createdClassPayload.name).toBe('10a'); // must be lowercase
+        expect(createdStudentPayload).not.toBeNull();
+        expect(createdStudentPayload.schoolClass).toBe('42');
+        expect(Schulkonsole.classes['10a']).toBe(42);
+        expect(Schulkonsole.studentIds['max123']).toBe(999);
+    });
+
+    it('should create missing class in lowercase on-the-fly when changing an identity', async () => {
+        let createdClassPayload = null;
+        let updatedStudentPayload = null;
+
+        Schulkonsole.studentIds['max123'] = 999;
+        Schulkonsole.authHeader = 'Bearer mock-token';
+        Schulkonsole.authTime = Date.now();
+
+        Schulkonsole.axiosInstance.defaults.adapter = jest.fn(async (config) => {
+            if (config.url === `${Schulkonsole.apiURL}school/schoolClasses` && config.method.toLowerCase() === 'post') {
+                createdClassPayload = JSON.parse(config.data);
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: {},
+                    config,
+                    data: { id: 84, name: createdClassPayload.name }
+                };
+            }
+            if (config.url === `${Schulkonsole.apiURL}students/999` && config.method.toLowerCase() === 'put') {
+                updatedStudentPayload = JSON.parse(config.data);
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: {},
+                    config,
+                    data: { id: 999 }
+                };
+            }
+            throw new Error(`Unexpected request to ${config.url}`);
+        });
+
+        await Schulkonsole.changeIdentity({
+            userId: 'max123',
+            firstName: 'Max',
+            lastName: 'Mustermann',
+            clazz: '05B'
+        });
+
+        expect(createdClassPayload).not.toBeNull();
+        expect(createdClassPayload.name).toBe('05b'); // must be lowercase
+        expect(updatedStudentPayload).not.toBeNull();
+        expect(updatedStudentPayload.schoolClass).toBe('84');
+        expect(Schulkonsole.classes['05b']).toBe(84);
     });
 });

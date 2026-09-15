@@ -125,12 +125,16 @@ class Schulkonsole extends ManagableDomain {
     }
 
     async addClass(className) {
+        if (!className) return null;
+        const normalizedClassName = className.toLowerCase().trim();
+        if (!normalizedClassName) return null;
+
         await this.authenticate();
-        let classId = this.classes[className.toLowerCase()];
+        let classId = this.classes[normalizedClassName];
         if (classId) return classId; // already exists
 
         const payload = {
-            name: className,
+            name: normalizedClassName,
             schoolTypeId: 1,
             schoolYear: config.schulkonsole?.schuljahr
         };
@@ -139,13 +143,15 @@ class Schulkonsole extends ManagableDomain {
         });
 
         classId = res.data.id;
-        this.classes[className.toLowerCase()] = classId;
+        this.classes[normalizedClassName] = classId;
         return classId;
     }
 
     async removeClass(className) {
+        if (!className) return;
+        const normalizedClassName = className.toLowerCase().trim();
         await this.authenticate();
-        let classId = this.classes[className.toLowerCase()];
+        let classId = this.classes[normalizedClassName];
         if (!classId) return; // does not exist
 
         await this.axiosInstance.delete(`${this.apiURL}school/schoolClasses`, {
@@ -153,13 +159,17 @@ class Schulkonsole extends ManagableDomain {
             data: [classId]
         });
 
-        delete this.classes[className.toLowerCase()];
+        delete this.classes[normalizedClassName];
     }
 
     async addIdentity(identity) {
         await this.authenticate();
-        const classId = this.classes[(identity.clazz || '').toLowerCase()];
-        if (!classId) throw new Error(`Class ${identity.clazz} not found in Schulkonsole. Call addClass first.`);
+        const normalizedClassName = (identity.clazz || '').toLowerCase().trim();
+        let classId = normalizedClassName ? this.classes[normalizedClassName] : null;
+        if (normalizedClassName && !classId) {
+            classId = await this.addClass(normalizedClassName);
+        }
+        if (!classId) throw new Error(`Class '${identity.clazz}' not found or could not be created in Schulkonsole.`);
 
         const payload = {
             schoolType: "1", comments: "", externalIdentifier: "", mySite: "",
@@ -185,7 +195,11 @@ class Schulkonsole extends ManagableDomain {
         const existingId = this.studentIds[identity.userId.toLowerCase()];
         if (!existingId) throw new Error(`Student ${identity.userId} not found. Must run getIdentities() first.`);
 
-        const classId = this.classes[(identity.clazz || '').toLowerCase()];
+        const normalizedClassName = (identity.clazz || '').toLowerCase().trim();
+        let classId = normalizedClassName ? this.classes[normalizedClassName] : null;
+        if (normalizedClassName && !classId) {
+            classId = await this.addClass(normalizedClassName);
+        }
 
         const payload = {
             schoolType: "1", comments: "", externalIdentifier: "", mySite: "",
