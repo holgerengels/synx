@@ -31,6 +31,20 @@ class ASV extends Domain {
         this.lag = asvConfig.lag || '30 days';
     }
 
+    mapClass(className) {
+        if (!className || typeof className !== 'string') return className;
+        const mappings = config.classMapping || [];
+        for (const item of mappings) {
+            if (!item || typeof item !== 'object') continue;
+            for (const [key, value] of Object.entries(item)) {
+                if (key.toLowerCase() === className.toLowerCase()) {
+                    return value;
+                }
+            }
+        }
+        return className;
+    }
+
     async readIdentities() {
         let client;
         try {
@@ -60,7 +74,7 @@ class ASV extends Domain {
             const classes = {};
             classRes.rows.forEach(r => {
                 if (!r.klassenname.includes('-')) {
-                    classes[r.id] = r.klassenname;
+                    classes[r.id] = this.mapClass(r.klassenname);
                 }
             });
 
@@ -246,7 +260,7 @@ class ASV extends Domain {
             const classes = {};
             classRes.rows.forEach(r => {
                 if (!r.klassenname.includes('-')) {
-                    classes[r.id] = r.klassenname;
+                    classes[r.id] = this.mapClass(r.klassenname);
                 }
             });
 
