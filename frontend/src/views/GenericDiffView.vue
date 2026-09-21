@@ -77,15 +77,24 @@
 
                         <template v-if="row.type === 'changed'">
                             <td :class="{'is-modified': row.new.firstName !== row.old.firstName}">
-                                <div v-if="row.new.firstName !== row.old.firstName" class="old-val">{{ row.old.firstName || '-' }}</div> <span v-if="row.new.firstName !== row.old.firstName">→</span>
+                                <template v-if="row.new.firstName !== row.old.firstName">
+                                    <div class="old-val">{{ row.old.firstName || '-' }}</div>
+                                    <span class="diff-arrow"> → </span>
+                                </template>
                                 <div class="new-val">{{ row.new.firstName || '-' }}</div>
                             </td>
                             <td :class="{'is-modified': row.new.lastName !== row.old.lastName}">
-                                <div v-if="row.new.lastName !== row.old.lastName" class="old-val">{{ row.old.lastName || '-' }}</div> <span v-if="row.new.lastName !== row.old.lastName">→</span>
+                                <template v-if="row.new.lastName !== row.old.lastName">
+                                    <div class="old-val">{{ row.old.lastName || '-' }}</div>
+                                    <span class="diff-arrow"> → </span>
+                                </template>
                                 <div class="new-val">{{ row.new.lastName || '-' }}</div>
                             </td>
                             <td v-for="prop in extraProps" :key="prop" :class="{'is-modified': row.new[prop] !== row.old[prop]}">
-                                <div v-if="row.new[prop] !== row.old[prop]" class="old-val">{{ row.old[prop] || '-' }}</div> <span v-if="row.new[prop] !== row.old[prop]">→</span>
+                                <template v-if="row.new[prop] !== row.old[prop]">
+                                    <div class="old-val">{{ row.old[prop] || '-' }}</div>
+                                    <span class="diff-arrow"> → </span>
+                                </template>
                                 <div class="new-val">{{ row.new[prop] || '-' }}</div>
                             </td>
                         </template>
@@ -365,6 +374,9 @@ function isTargetManagable() {
 }
 .old-val, .new-val {
     display: inline-block;
+}
+.diff-arrow {
+    color: var(--wa-color-neutral-500);
 }
 .view-header {
     position: sticky;

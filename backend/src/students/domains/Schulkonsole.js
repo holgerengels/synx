@@ -3,6 +3,7 @@ const https = require('https');
 const Identity = require('../../domains/Identity');
 const config = require('../../config');
 const ManagableDomain = require('../../domains/ManagableDomain');
+const { formatSchulkonsoleError } = require('./schulkonsoleErrorUtils');
 
 class Schulkonsole extends ManagableDomain {
     get supportedProperties() { return ['userId', 'firstName', 'lastName', 'clazz']; }
@@ -181,24 +182,34 @@ class Schulkonsole extends ManagableDomain {
             email: `${identity.userId}@musterschule.schule.paedml`
         };
 
-        const res = await this.axiosInstance.post(`${this.apiURL}students`, payload, {
-            headers: { 'Authorization': this.authHeader }
-        });
-        if (res.data && res.data.id) {
-            this.studentIds[identity.userId.toLowerCase()] = res.data.id;
+        try {
+            const res = await this.axiosInstance.post(`${this.apiURL}students`, payload, {
+                headers: { 'Authorization': this.authHeader }
+            });
+            if (res.data && res.data.id) {
+                this.studentIds[identity.userId.toLowerCase()] = res.data.id;
+            }
+            return res.data;
+        } catch (err) {
+            const enrichedMsg = formatSchulkonsoleError(err, identity);
+            const error = new Error(enrichedMsg);
+            error.response = err.response;
+            throw error;
         }
-        return res.data;
     }
 
     async changeIdentity(identity) {
         await this.authenticate();
-        const existingId = this.studentIds[identity.userId.toLowerCase()];
+        const existingId = this.studentIds[identity.userId.toLowerCase()] || identity.id;
         if (!existingId) throw new Error(`Student ${identity.userId} not found. Must run getIdentities() first.`);
 
         const normalizedClassName = (identity.clazz || '').toLowerCase().trim();
         let classId = normalizedClassName ? this.classes[normalizedClassName] : null;
         if (normalizedClassName && !classId) {
             classId = await this.addClass(normalizedClassName);
+        }
+        if (normalizedClassName && !classId) {
+            throw new Error(`Class '${identity.clazz}' not found or could not be created in Schulkonsole.`);
         }
 
         const payload = {
@@ -209,9 +220,16 @@ class Schulkonsole extends ManagableDomain {
             homeDirectory: `\\\\SP01\\MLData\\Benutzer\\SUS\\${identity.userId}`
         };
 
-        await this.axiosInstance.put(`${this.apiURL}students/${existingId}`, payload, {
-            headers: { 'Authorization': this.authHeader }
-        });
+        try {
+            await this.axiosInstance.put(`${this.apiURL}students/${existingId}`, payload, {
+                headers: { 'Authorization': this.authHeader }
+            });
+        } catch (err) {
+            const enrichedMsg = formatSchulkonsoleError(err, identity);
+            const error = new Error(enrichedMsg);
+            error.response = err.response;
+            throw error;
+        }
     }
 
     async removeIdentity(identity) {

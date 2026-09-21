@@ -123,4 +123,23 @@ describe('SyncTask', () => {
         const html = task.format(report);
         expect(html).toContain('DevMode');
     });
+
+    it('should record target domain errors in details.errors', async () => {
+        mocks.dummy.data = [];
+        const task = new SyncTask('asv', 'dummy');
+
+        mocks.dummy.addIdentity = jest.fn(async () => {
+            throw new Error('Target domain add failed');
+        });
+
+        mocks.asv.data = [
+            { userId: 'u1', firstName: 'User', lastName: 'One', clazz: '10A' }
+        ];
+        mocks.asv.invalidate();
+
+        const report = await task.execute({ forceRefresh: true });
+        expect(report.details.errors).toHaveLength(1);
+        expect(report.details.errors[0].id).toBe('u1');
+        expect(report.details.errors[0].message).toBe('Add error: Target domain add failed');
+    });
 });

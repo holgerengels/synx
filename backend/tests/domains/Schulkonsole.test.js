@@ -300,4 +300,45 @@ describe('Schulkonsole and SchulkonsoleTeacher Re-authentication', () => {
         expect(updatedStudentPayload.schoolClass).toBe('84');
         expect(Schulkonsole.classes['05b']).toBe(84);
     });
+
+    it('should throw enriched error when addIdentity fails with 400', async () => {
+        Schulkonsole.axiosInstance.defaults.adapter = jest.fn(async (config) => {
+            if (config.url === Schulkonsole.tokenURL) {
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: {},
+                    config,
+                    data: { token_type: 'Bearer', access_token: 'mock-token' }
+                };
+            }
+            if (config.url === `${Schulkonsole.apiURL}school/schoolClasses`) {
+                return {
+                    status: 200,
+                    statusText: 'OK',
+                    headers: {},
+                    config,
+                    data: [{ id: 10, name: '1bk1p1' }]
+                };
+            }
+            if (config.url === `${Schulkonsole.apiURL}students`) {
+                const err = new Error('Request failed with status code 400');
+                err.response = {
+                    status: 400,
+                    data: { message: 'Ungültige Zeichen im Vornamen' }
+                };
+                throw err;
+            }
+            throw new Error(`Unexpected request to ${config.url}`);
+        });
+
+        await expect(Schulkonsole.addIdentity({
+            userId: 'dorul.ker',
+            firstName: 'Kerem–Arda',
+            lastName: 'Dorul',
+            clazz: '1BK1P1'
+        })).rejects.toThrow(
+            "Request failed with status code 400: Ungültige Zeichen im Vornamen (Hinweis: Vorname 'Kerem–Arda' enthält typografischen Gedankenstrich '–' (U+2013) statt ASCII-Bindestrich '-')"
+        );
+    });
 });
