@@ -331,6 +331,58 @@ class ASV extends Domain {
             client.release();
         }
     }
+
+    /**
+     * Rename a student's user ID in ASV (sync.user_id table).
+     * @param {string} oldUserId
+     * @param {string} newUserId
+     * @returns {Promise<{success: boolean, oldUserId: string, newUserId: string}>}
+     */
+    async renameIdentity(oldUserId, newUserId) {
+        if (!oldUserId || !newUserId) {
+            throw new Error('Alte und neue User-ID müssen angegeben werden.');
+        }
+        if (oldUserId === newUserId) {
+            throw new Error('Alte und neue User-ID dürfen nicht identisch sein.');
+        }
+
+        let client;
+        try {
+            client = await this.pool.connect();
+        } catch (e) {
+            throw new Error('ASV DB Connection failed: ' + e.message);
+        }
+
+        try {
+            // Check if oldUserId exists
+            const oldCheck = await client.query('SELECT id, userid FROM sync.user_id WHERE userid = $1', [oldUserId]);
+            if (oldCheck.rows.length === 0) {
+                throw new Error(`User-ID '${oldUserId}' existiert nicht in ASV.`);
+            }
+
+            // Check if newUserId is already taken
+            const newCheck = await client.query('SELECT id, userid FROM sync.user_id WHERE userid = $1', [newUserId]);
+            if (newCheck.rows.length > 0) {
+                throw new Error(`User-ID '${newUserId}' ist in ASV bereits vergeben.`);
+            }
+
+            // Perform rename
+            await client.query('UPDATE sync.user_id SET userid = $1 WHERE userid = $2', [newUserId, oldUserId]);
+
+            this.invalidate();
+
+            return {
+                success: true,
+                oldUserId,
+                newUserId
+            };
+        } catch (e) {
+            console.error(`ASV renameIdentity failed from ${oldUserId} to ${newUserId}:`, e.message);
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
 }
 
 module.exports = new ASV();

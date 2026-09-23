@@ -23,6 +23,10 @@ class ManagableDomain extends Domain {
     async removeIdentity(identity) {
         throw new NotImplementedError(`[ManagableDomain] removeIdentity() is not implemented for domain '${this.domainName}'`);
     }
+
+    async renameIdentity(oldUserId, newUserId) {
+        throw new NotImplementedError(`[ManagableDomain] renameIdentity() is not implemented for domain '${this.domainName}'`);
+    }
 }
 
 module.exports = ManagableDomain;

@@ -8,6 +8,10 @@
         {
           "name": "IDs generieren",
           "run": "asv-generate-ids"
+        },
+        {
+          "name": "Umbenennen",
+          "dialog": "rename"
         }
       ],
       "color": "#00457D"
@@ -49,7 +53,8 @@
       "actions": [
         {
           "name": "Remnants",
-          "run": "nextcloud-remnants-list"
+          "run": "nextcloud-remnants-list",
+          "dialog": "remnants"
         }
       ],
       "color": "#0082C9"
@@ -245,6 +250,12 @@
       "description": "Hebt das Kennwortablaufdatum für Schüler*innen im Active Directory/LDAP auf.",
       "class": "PaedmlFixPasswordExpirationTask",
       "schedule": "10 7-18 * * *"
+    },
+    {
+      "name": "rename-userid",
+      "titel": "Schüler:in umbenennen",
+      "description": "Benennt die User-ID eines Schülers in ASV und Untis um.",
+      "class": "RenameUserIdTask"
     }
   ]
 }

@@ -21,7 +21,8 @@ const registry = {
     'fachnetz-arbeitsheft-sync': new (require('../fachnetz/tasks/FachnetzArbeitsheftSyncTask'))(),
     'matrix-moodle-courses': new (require('../students/tasks/MatrixMoodleCoursesTask'))(),
     'matrix-reconcile-users': new (require('../students/tasks/MatrixReconcileUsersTask'))(),
-    'paedml-fix-password-expiration': new (require('../students/tasks/PaedmlFixPasswordExpirationTask'))()
+    'paedml-fix-password-expiration': new (require('../students/tasks/PaedmlFixPasswordExpirationTask'))(),
+    'rename-userid': new (require('../students/tasks/RenameUserIdTask'))()
 };
 
 // Dynamically register SyncTask and DiffTask instances from config

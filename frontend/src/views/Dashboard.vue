@@ -40,6 +40,12 @@
         :remnants="reportDialogRemnants"
     />
 
+    <RenameDialog 
+        :open="isRenameDialogOpen" 
+        @update:open="val => isRenameDialogOpen = val" 
+        @renamed="loadCategoryData()"
+    />
+
   </div>
 </template>
 
@@ -49,6 +55,7 @@ import axios from 'axios';
 import DomainCard from '../components/DomainCard.vue';
 import DiffCard from '../components/DiffCard.vue';
 import RemnantsDialog from '../components/RemnantsDialog.vue';
+import RenameDialog from '../components/RenameDialog.vue';
 import { useToast } from '../composables/useToast';
 import { getDiffDomains } from '../utils/diffDomains.js';
 
@@ -65,6 +72,7 @@ const error = ref('');
 
 const isDialogOpen = ref(false);
 const isRemnantsDialogOpen = ref(false);
+const isRenameDialogOpen = ref(false);
 const reportDialogTitle = ref('');
 const reportDialogContent = ref('');
 const reportDialogRemnants = ref([]);
@@ -198,7 +206,23 @@ async function runSync(df) {
     }
 }
 
+function openDialog(dialogName, data, act) {
+    if (dialogName === 'remnants' && data?.report?.remnants) {
+        reportDialogTitle.value = act?.name || 'Nextcloud Remnants';
+        reportDialogRemnants.value = data.report.remnants;
+        isRemnantsDialogOpen.value = true;
+    } else if (dialogName === 'rename') {
+        isRenameDialogOpen.value = true;
+    }
+}
+
 async function runAction(act, contextName) {
+    // Dialog without previous task execution (e.g. Rename)
+    if (act.dialog && !act.run && !act.endpoint && !act.task) {
+        openDialog(act.dialog, null, act);
+        return;
+    }
+
     const actionKey = act.download || act.endpoint || act.run || act.task;
     if (!actionKey) return;
     
@@ -226,24 +250,16 @@ async function runAction(act, contextName) {
             setTimeout(() => URL.revokeObjectURL(url), 100);
         }
         
-        // Open Dialog configuration
-        reportDialogTitle.value = act.name || 'Aktionsbericht';
-        reportDialogContent.value = '';
-        reportDialogRemnants.value = [];
-
-        // Dedizierte Remnants View Logik
-        if (reqTaskName === 'nextcloud-remnants-list' && res.data?.report?.remnants) {
-            reportDialogTitle.value = act.name || 'Aktionsbericht';
-            reportDialogRemnants.value = res.data.report.remnants;
-            isRemnantsDialogOpen.value = true;
-        } 
+        // Handle Dialog with task result (e.g. Remnants)
+        if (act.dialog) {
+            openDialog(act.dialog, res.data, act);
+            return;
+        }
         
         const msgHtml = res.data?.html || `Aktion ausgeführt`;
         
         if (contextName) {
-            if (reqTaskName !== 'nextcloud-remnants-list') {
-                 toast.show(msgHtml, 'success');
-            }
+            toast.show(msgHtml, 'success');
             
             // Auto reload contextual layout
             if (contextName.includes('-')) {

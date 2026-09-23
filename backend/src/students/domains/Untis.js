@@ -123,6 +123,94 @@ class Untis extends ManagableDomain {
             if (connection) await connection.end();
         }
     }
+
+    /**
+     * Checks if any Untis clients are currently logged in.
+     * @returns {Promise<{active: boolean, count: number}>}
+     */
+    async hasActiveClients() {
+        let connection;
+        try {
+            connection = await mysql.createConnection(this.dbConfig);
+            const [rows] = await connection.execute(
+                "SELECT COUNT(*) AS activeCount FROM User WHERE LoggedIn = 1"
+            );
+            const count = rows && rows[0] ? Number(rows[0].activeCount) : 0;
+            return {
+                active: count > 0,
+                count: count
+            };
+        } catch (e) {
+            console.error('Untis hasActiveClients failed', e);
+            throw new Error('Untis hasActiveClients failed: ' + e.message);
+        } finally {
+            if (connection) await connection.end();
+        }
+    }
+
+    /**
+     * Rename a student's user ID (Name, ForeignKey, OldName) in Untis Student table.
+     * @param {string} oldUserId
+     * @param {string} newUserId
+     * @returns {Promise<{success: boolean, oldUserId: string, newUserId: string, affectedRows: number}>}
+     */
+    async renameIdentity(oldUserId, newUserId) {
+        if (!oldUserId || !newUserId) {
+            throw new Error('Alte und neue User-ID müssen angegeben werden.');
+        }
+        if (oldUserId === newUserId) {
+            throw new Error('Alte und neue User-ID dürfen nicht identisch sein.');
+        }
+
+        let connection;
+        try {
+            connection = await mysql.createConnection(this.dbConfig);
+        } catch (e) {
+            throw new Error('Untis DB Connection failed: ' + e.message);
+        }
+
+        try {
+            // Check if old student exists in Untis
+            const [oldRows] = await connection.execute(
+                "SELECT COUNT(*) AS cnt FROM Student WHERE SCHOOL_ID = ? AND VERSION_ID = ? AND Name = ?",
+                [this.schulid, this.version, oldUserId]
+            );
+            const oldExists = oldRows && oldRows[0] && Number(oldRows[0].cnt) > 0;
+            if (!oldExists) {
+                throw new Error(`Schüler:in mit Name '${oldUserId}' existiert nicht in Untis.`);
+            }
+
+            // Check if new student name already exists in Untis (collision)
+            const [newRows] = await connection.execute(
+                "SELECT COUNT(*) AS cnt FROM Student WHERE SCHOOL_ID = ? AND VERSION_ID = ? AND Name = ?",
+                [this.schulid, this.version, newUserId]
+            );
+            const newExists = newRows && newRows[0] && Number(newRows[0].cnt) > 0;
+            if (newExists) {
+                throw new Error(`Schüler:in mit Name '${newUserId}' existiert bereits in Untis.`);
+            }
+
+            // Update Name, ForeignKey, OldName in Student table
+            const [result] = await connection.execute(
+                "UPDATE Student SET Name = ?, ForeignKey = ?, OldName = ? WHERE SCHOOL_ID = ? AND VERSION_ID = ? AND Name = ?",
+                [newUserId, newUserId, oldUserId, this.schulid, this.version, oldUserId]
+            );
+
+            this.invalidate();
+
+            return {
+                success: true,
+                oldUserId,
+                newUserId,
+                affectedRows: result.affectedRows || 0
+            };
+        } catch (e) {
+            console.error(`Untis renameIdentity failed from ${oldUserId} to ${newUserId}:`, e.message);
+            throw e;
+        } finally {
+            if (connection) await connection.end();
+        }
+    }
 }
 
 module.exports = new Untis();

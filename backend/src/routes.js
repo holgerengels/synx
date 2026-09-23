@@ -295,6 +295,21 @@ router.get('/investigate/:category/:id', verifyToken, async (req, res) => {
     }
 });
 
+// Untis Active Clients Check
+router.get('/untis/active-clients', verifyToken, async (req, res) => {
+    try {
+        const untis = getDomain('untis');
+        if (!untis || typeof untis.hasActiveClients !== 'function') {
+            return res.json({ active: false, count: 0 });
+        }
+        const status = await untis.hasActiveClients();
+        res.json(status);
+    } catch (e) {
+        console.error('[Route] GET /untis/active-clients failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Generic Task Execution Endpoint — delegates to centralized taskRunner for consistent logging
 router.post('/execute/:taskName', verifyToken, async (req, res) => {
     try {
