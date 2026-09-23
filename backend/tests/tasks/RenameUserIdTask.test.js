@@ -100,7 +100,7 @@ describe('RenameUserIdTask', () => {
             expect(html).toContain('WebUntis:');
             expect(html).toContain('Schulkonsole:');
             expect(html).toContain('Nextcloud:');
-            expect(html).toContain('Matrix:');
+            expect(html).toContain('Moodle:');
             expect(html).not.toContain('(DevMode: Dry-Run)');
         });
 

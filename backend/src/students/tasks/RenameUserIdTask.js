@@ -31,10 +31,10 @@ class RenameUserIdTask extends Task {
         const asv = getDomain('asv');
 
         const warnings = [
-            'WebUntis: Wird bei der nächsten Stammdatenübertragung synchronisiert.',
-            'Schulkonsole: Manuelle Umbenennung erforderlich.',
-            'Nextcloud: Manuelle Umbenennung erforderlich.',
-            'Matrix: Manuelle Umbenennung erforderlich.'
+            'WebUntis: Wird bei der nächsten Stammdatenübertragung automatisch synchronisiert (WEBUNTIS_ID).',
+            'Schulkonsole: User wird gelöscht und neu angelegt -> Neues Passwort erforderlich, Dateien auf dem H-Laufwerk gehen verloren.',
+            'Nextcloud: Sieht einen neuen User und den alten nicht mehr im LDAP -> Dateien können manuell kopiert werden.',
+            'Moodle: Sieht ebenfalls einen neuen User und den alten nicht mehr im LDAP.'
         ];
 
         if (devMode) {
@@ -92,10 +92,10 @@ class RenameUserIdTask extends Task {
         html += `<ul style="margin: 0.5rem 0 0 1rem; padding: 0; font-size: 0.9em;">`;
         html += `<li><span style="color:var(--wa-color-success-600)">✅ ASV:</span> Erfolgreich umbenannt</li>`;
         html += `<li><span style="color:var(--wa-color-success-600)">✅ Untis:</span> Erfolgreich umbenannt</li>`;
-        html += `<li><span style="color:var(--wa-color-neutral-600)">ℹ️ WebUntis:</span> Nächste Stammdatenübertragung</li>`;
-        html += `<li><span style="color:var(--wa-color-warning-600)">⚠️ Schulkonsole:</span> Manuelle Aktion nötig</li>`;
-        html += `<li><span style="color:var(--wa-color-warning-600)">⚠️ Nextcloud:</span> Manuelle Aktion nötig</li>`;
-        html += `<li><span style="color:var(--wa-color-warning-600)">⚠️ Matrix:</span> Manuelle Aktion nötig</li>`;
+        html += `<li><span style="color:var(--wa-color-neutral-600)">ℹ️ WebUntis:</span> Nächste Stammdatenübertragung (automatisch)</li>`;
+        html += `<li><span style="color:var(--wa-color-danger-600)">⚠️ Schulkonsole:</span> User wird neu angelegt (Neues Passwort nötig, H-Laufwerk geht verloren!)</li>`;
+        html += `<li><span style="color:var(--wa-color-warning-600)">⚠️ Nextcloud:</span> Neuer LDAP-User (Dateien manuell kopieren)</li>`;
+        html += `<li><span style="color:var(--wa-color-warning-600)">⚠️ Moodle:</span> Neuer LDAP-User (alter Account verwaist)</li>`;
         html += `</ul>`;
 
         return html;

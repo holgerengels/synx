@@ -1,5 +1,5 @@
 <template>
-  <wa-dialog :open="open" @wa-after-hide="handleClose" label="Schüler:in umbenennen" style="--width: 650px; --body-spacing: 0;">
+  <wa-dialog :open="open" @wa-after-hide="handleClose" label="Schüler:in umbenennen" style="--width: 700px; --body-spacing: 0;">
     <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 1.25rem;">
 
       <!-- Error / Success Alert -->
@@ -77,49 +77,85 @@
         </div>
       </div>
 
-      <!-- Systemstatus Box -->
-      <div style="border: 1px solid var(--wa-color-neutral-200); border-radius: 8px; background: var(--wa-color-neutral-50); padding: 0.85rem 1rem;">
-        <div style="font-weight: 600; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--wa-color-neutral-600); margin-bottom: 0.6rem; display: flex; align-items: center; justify-content: space-between;">
-          <span>Systemstatus</span>
-          <wa-button variant="text" size="small" @click="fetchUntisStatus" :disabled="untisStatus.loading" style="padding: 0; min-height: auto;">
-            <wa-icon name="arrow-clockwise" :class="{ spin: untisStatus.loading }"></wa-icon>
-          </wa-button>
+      <!-- Untis Readiness Check -->
+      <div style="border: 1px solid var(--wa-color-neutral-200); border-radius: 8px; background: var(--wa-color-neutral-50); padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.85em;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <strong style="color: var(--wa-color-neutral-700);">Untis MultiUser DB:</strong>
+          <template v-if="untisStatus.loading">
+            <wa-icon name="arrow-clockwise" class="spin" style="color: var(--wa-color-neutral-500);"></wa-icon>
+            <span style="color: var(--wa-color-neutral-600);">Clients werden geprüft...</span>
+          </template>
+          <template v-else-if="untisStatus.error">
+            <wa-icon name="exclamation-triangle" style="color: var(--wa-color-warning-600);"></wa-icon>
+            <span style="color: var(--wa-color-warning-700);">Status konnte nicht ermittelt werden: {{ untisStatus.error }}</span>
+          </template>
+          <template v-else-if="untisStatus.active">
+            <wa-icon name="x-circle-fill" style="color: var(--wa-color-danger-600);"></wa-icon>
+            <span style="color: var(--wa-color-danger-700); font-weight: 500;">
+              {{ untisStatus.count }} Untis-Client(s) aktiv eingeloggt. Umbenennung blockiert.
+            </span>
+          </template>
+          <template v-else>
+            <wa-icon name="check-circle-fill" style="color: var(--wa-color-success-600);"></wa-icon>
+            <span style="color: var(--wa-color-success-700);">Keine Untis-Clients eingeloggt (Bereit zur Umbenennung)</span>
+          </template>
+        </div>
+        <wa-button variant="text" size="small" @click="fetchUntisStatus" :disabled="untisStatus.loading" style="padding: 0; min-height: auto;">
+          <wa-icon name="arrow-clockwise" :class="{ spin: untisStatus.loading }"></wa-icon>
+        </wa-button>
+      </div>
+
+      <!-- Konsequenzen & bekannte Probleme Box -->
+      <div style="border: 1px solid var(--wa-color-warning-300); border-radius: 8px; background: var(--wa-color-warning-50); padding: 0.85rem 1rem;">
+        <div style="font-weight: 600; font-size: 0.9em; color: var(--wa-color-warning-900); margin-bottom: 0.65rem; display: flex; align-items: center; gap: 0.4rem;">
+          <wa-icon name="exclamation-triangle-fill" style="color: var(--wa-color-warning-600); font-size: 1rem;"></wa-icon>
+          <span>Konsequenzen &amp; bekannte Probleme bei einer Umbenennung:</span>
         </div>
 
-        <div style="display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.85em;">
-          <!-- Untis Session Status -->
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <template v-if="untisStatus.loading">
-              <wa-icon name="arrow-clockwise" class="spin" style="color: var(--wa-color-neutral-500);"></wa-icon>
-              <span style="color: var(--wa-color-neutral-600);">Untis-Clients werden geprüft...</span>
-            </template>
-            <template v-else-if="untisStatus.error">
-              <wa-icon name="exclamation-triangle" style="color: var(--wa-color-warning-600);"></wa-icon>
-              <span style="color: var(--wa-color-warning-700);">Untis-Status konnte nicht ermittelt werden: {{ untisStatus.error }}</span>
-            </template>
-            <template v-else-if="untisStatus.active">
-              <wa-icon name="x-circle-fill" style="color: var(--wa-color-danger-600);"></wa-icon>
-              <span style="color: var(--wa-color-danger-700); font-weight: 500;">
-                {{ untisStatus.count }} Untis-Client(s) aktiv eingeloggt. Umbenennung blockiert.
-              </span>
-            </template>
-            <template v-else>
-              <wa-icon name="check-circle-fill" style="color: var(--wa-color-success-600);"></wa-icon>
-              <span style="color: var(--wa-color-success-700);">Keine Untis-Clients eingeloggt (MultiUser DB bereit)</span>
-            </template>
+        <div style="display: flex; flex-direction: column; gap: 0.65rem; font-size: 0.85em; color: var(--wa-color-neutral-800);">
+          
+          <!-- Schulkonsole -->
+          <div style="display: flex; gap: 0.6rem; align-items: flex-start;">
+            <div style="min-width: 105px; font-weight: 600; color: var(--wa-color-danger-700);">Schulkonsole:</div>
+            <div style="line-height: 1.4;">
+              User wird gelöscht und neu angelegt:
+              <ul style="margin: 0.25rem 0 0 1rem; padding: 0; color: var(--wa-color-danger-800);">
+                <li><strong>Neues Passwort erforderlich</strong>.</li>
+                <li><strong>Dateien auf dem H-Laufwerk gehen verloren</strong> (vorher manuell sichern!).</li>
+              </ul>
+            </div>
           </div>
 
-          <!-- WebUntis Notice -->
-          <div style="display: flex; align-items: flex-start; gap: 0.5rem; color: var(--wa-color-neutral-600);">
-            <wa-icon name="info-circle" style="color: var(--wa-color-primary-600); flex-shrink: 0; margin-top: 2px;"></wa-icon>
-            <span><strong>WebUntis:</strong> Aktualisierung erfolgt automatisch bei der nächsten Stammdatenübertragung.</span>
+          <!-- Nextcloud -->
+          <div style="display: flex; gap: 0.6rem; align-items: flex-start; border-top: 1px solid var(--wa-color-warning-200); padding-top: 0.5rem;">
+            <div style="min-width: 105px; font-weight: 600; color: var(--wa-color-warning-800);">Nextcloud:</div>
+            <div style="line-height: 1.4;">
+              Sieht einen neuen User und den alten nicht mehr im LDAP:
+              <ul style="margin: 0.25rem 0 0 1rem; padding: 0; color: var(--wa-color-neutral-700);">
+                <li>Dateien können manuell vom alten in den neuen Benutzerordner kopiert werden.</li>
+              </ul>
+            </div>
           </div>
 
-          <!-- Manual Action Warning -->
-          <div style="display: flex; align-items: flex-start; gap: 0.5rem; color: var(--wa-color-warning-700);">
-            <wa-icon name="exclamation-circle" style="color: var(--wa-color-warning-600); flex-shrink: 0; margin-top: 2px;"></wa-icon>
-            <span><strong>Schulkonsole, Nextcloud, Matrix:</strong> Manuelle Umbenennung erforderlich.</span>
+          <!-- Moodle -->
+          <div style="display: flex; gap: 0.6rem; align-items: flex-start; border-top: 1px solid var(--wa-color-warning-200); padding-top: 0.5rem;">
+            <div style="min-width: 105px; font-weight: 600; color: var(--wa-color-warning-800);">Moodle:</div>
+            <div style="line-height: 1.4;">
+              Sieht ebenfalls einen neuen User und den alten nicht mehr im LDAP:
+              <ul style="margin: 0.25rem 0 0 1rem; padding: 0; color: var(--wa-color-neutral-700);">
+                <li>Kurseinschreibungen, Abgaben und Bewertungen verbleiben am alten Moodle-Account.</li>
+              </ul>
+            </div>
           </div>
+
+          <!-- WebUntis -->
+          <div style="display: flex; gap: 0.6rem; align-items: flex-start; border-top: 1px solid var(--wa-color-warning-200); padding-top: 0.5rem;">
+            <div style="min-width: 105px; font-weight: 600; color: var(--wa-color-primary-700);">WebUntis:</div>
+            <div style="line-height: 1.4; color: var(--wa-color-neutral-700);">
+              Wird bei der nächsten Stammdatenübertragung von Untis automatisch aktualisiert (Matching via <code>WEBUNTIS_ID</code>).
+            </div>
+          </div>
+
         </div>
       </div>
 
