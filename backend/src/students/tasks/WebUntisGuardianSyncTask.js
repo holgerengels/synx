@@ -12,10 +12,13 @@ class WebUntisGuardianSyncTask extends Task {
         const asv = getDomain('asv');
         const untis = getDomain('webuntis');
 
+        console.log('[Guardian Sync] Starting WebUntisGuardianSyncTask...');
+        console.log('[Guardian Sync] Fetching guardians in parallel from ASV and WebUntis...');
         const [asvGuardians, untisGuardians] = await Promise.all([
             asv.readGuardians(),
             untis.readGuardians()
         ]);
+        console.log(`[Guardian Sync] Fetched ${asvGuardians.length} guardians from ASV, ${untisGuardians.length} from WebUntis.`);
 
         const untisMap = {};
         for (const ug of untisGuardians) {
