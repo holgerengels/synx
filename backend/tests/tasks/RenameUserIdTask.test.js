@@ -34,11 +34,15 @@ describe('RenameUserIdTask', () => {
     });
 
     describe('Active Untis Clients Check', () => {
-        test('fails when Untis has active clients logged in', async () => {
-            mocks.untis.hasActiveClients.mockResolvedValueOnce({ active: true, count: 3 });
+        test('fails when Untis has active clients logged in, including session details in error', async () => {
+            mocks.untis.hasActiveClients.mockResolvedValueOnce({
+                active: true,
+                count: 1,
+                sessions: [{ user: 'BK', osUser: 'Irmgard.Hain', workstation: 'V205P01W11' }]
+            });
 
             await expect(task.execute({ oldUserId: 'mueller.max', newUserId: 'meier.max' })).rejects.toThrow(
-                'Untis hat noch aktive Verbindungen (3 Client(s) eingeloggt). Bitte Untis zuerst schließen.'
+                'Untis hat noch aktive Verbindungen (1 Client(s) eingeloggt: BK (Irmgard.Hain an V205P01W11)). Bitte Untis zuerst schließen.'
             );
 
             expect(mocks.asv.renameIdentity).not.toHaveBeenCalled();

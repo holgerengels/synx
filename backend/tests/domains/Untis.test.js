@@ -31,24 +31,34 @@ describe('Untis Domain - hasActiveClients & renameIdentity', () => {
     });
 
     describe('hasActiveClients', () => {
-        test('returns active: false when 0 clients are logged in', async () => {
-            mockConnection.execute.mockResolvedValueOnce([[{ activeCount: 0 }]]);
+        test('returns active: false and empty sessions when 0 clients are logged in', async () => {
+            mockConnection.execute.mockResolvedValueOnce([[]]);
 
             const result = await untis.hasActiveClients();
 
-            expect(result).toEqual({ active: false, count: 0 });
+            expect(result).toEqual({ active: false, count: 0, sessions: [] });
             expect(mockConnection.execute).toHaveBeenCalledWith(
-                'SELECT COUNT(*) AS activeCount FROM User WHERE LoggedIn = 1'
+                'SELECT USER_ID, Name, UserInfo, LogInDate, LogInTime FROM User WHERE LoggedIn = 1'
             );
             expect(mockConnection.end).toHaveBeenCalled();
         });
 
-        test('returns active: true when 1 or more clients are logged in', async () => {
-            mockConnection.execute.mockResolvedValueOnce([[{ activeCount: 2 }]]);
+        test('returns active: true with parsed sessions when clients are logged in', async () => {
+            mockConnection.execute.mockResolvedValueOnce([[
+                { USER_ID: 3, Name: 'BK', UserInfo: 'Apr 8 2026~0~V205P01W11~Irmgard.Hain~2026.7.0\0', LogInDate: 20260923, LogInTime: 1304 },
+                { USER_ID: 4, Name: 'Stundenplan', UserInfo: 'Apr 8 2026~0~V307P03~stunden.plan~2026.7.0\0', LogInDate: 20260923, LogInTime: 1251 }
+            ]]);
 
             const result = await untis.hasActiveClients();
 
-            expect(result).toEqual({ active: true, count: 2 });
+            expect(result).toEqual({
+                active: true,
+                count: 2,
+                sessions: [
+                    { user: 'BK', workstation: 'V205P01W11', osUser: 'Irmgard.Hain', loginAt: '23.09.2026 13:04' },
+                    { user: 'Stundenplan', workstation: 'V307P03', osUser: 'stunden.plan', loginAt: '23.09.2026 12:51' }
+                ]
+            });
             expect(mockConnection.end).toHaveBeenCalled();
         });
     });

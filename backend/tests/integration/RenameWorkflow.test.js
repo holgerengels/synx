@@ -76,14 +76,24 @@ describe('Rename Workflow API Integration', () => {
         });
 
         test('returns active: true when clients are logged in', async () => {
-            mockUntis.hasActiveClients.mockResolvedValueOnce({ active: true, count: 2 });
+            mockUntis.hasActiveClients.mockResolvedValueOnce({
+                active: true,
+                count: 2,
+                sessions: [
+                    { user: 'BK', workstation: 'V205P01W11', osUser: 'Irmgard.Hain', loginAt: '23.09.2026 13:04' },
+                    { user: 'Stundenplan', workstation: 'V307P03', osUser: 'stunden.plan', loginAt: '23.09.2026 12:51' }
+                ]
+            });
 
             const res = await request(app)
                 .get('/api/untis/active-clients')
                 .set('Authorization', `Bearer ${token}`);
 
             expect(res.status).toBe(200);
-            expect(res.body).toEqual({ active: true, count: 2 });
+            expect(res.body.active).toBe(true);
+            expect(res.body.count).toBe(2);
+            expect(res.body.sessions).toHaveLength(2);
+            expect(res.body.sessions[0].user).toBe('BK');
         });
 
         test('returns 401 without auth token', async () => {

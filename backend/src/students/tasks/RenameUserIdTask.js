@@ -23,7 +23,12 @@ class RenameUserIdTask extends Task {
         if (untis && typeof untis.hasActiveClients === 'function') {
             const clientStatus = await untis.hasActiveClients();
             if (clientStatus.active) {
-                throw new Error(`Untis hat noch aktive Verbindungen (${clientStatus.count} Client(s) eingeloggt). Bitte Untis zuerst schließen.`);
+                const userList = (clientStatus.sessions || []).map(s => {
+                    const details = [s.osUser, s.workstation].filter(Boolean).join(' an ');
+                    return s.user + (details ? ` (${details})` : '');
+                }).join(', ');
+                const sessionInfo = userList ? `: ${userList}` : '';
+                throw new Error(`Untis hat noch aktive Verbindungen (${clientStatus.count} Client(s) eingeloggt${sessionInfo}). Bitte Untis zuerst schließen.`);
             }
         }
 

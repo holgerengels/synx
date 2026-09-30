@@ -78,31 +78,52 @@
       </div>
 
       <!-- Untis Readiness Check -->
-      <div style="border: 1px solid var(--wa-color-neutral-200); border-radius: 8px; background: var(--wa-color-neutral-50); padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.85em;">
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-          <strong style="color: var(--wa-color-neutral-700);">Untis MultiUser DB:</strong>
-          <template v-if="untisStatus.loading">
-            <wa-icon name="arrow-clockwise" class="spin" style="color: var(--wa-color-neutral-500);"></wa-icon>
-            <span style="color: var(--wa-color-neutral-600);">Clients werden geprüft...</span>
-          </template>
-          <template v-else-if="untisStatus.error">
-            <wa-icon name="exclamation-triangle" style="color: var(--wa-color-warning-600);"></wa-icon>
-            <span style="color: var(--wa-color-warning-700);">Status konnte nicht ermittelt werden: {{ untisStatus.error }}</span>
-          </template>
-          <template v-else-if="untisStatus.active">
-            <wa-icon name="x-circle-fill" style="color: var(--wa-color-danger-600);"></wa-icon>
-            <span style="color: var(--wa-color-danger-700); font-weight: 500;">
-              {{ untisStatus.count }} Untis-Client(s) aktiv eingeloggt. Umbenennung blockiert.
-            </span>
-          </template>
-          <template v-else>
-            <wa-icon name="check-circle-fill" style="color: var(--wa-color-success-600);"></wa-icon>
-            <span style="color: var(--wa-color-success-700);">Keine Untis-Clients eingeloggt (Bereit zur Umbenennung)</span>
-          </template>
+      <div style="border: 1px solid var(--wa-color-neutral-200); border-radius: 8px; background: var(--wa-color-neutral-50); padding: 0.75rem 1rem; font-size: 0.85em;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <strong style="color: var(--wa-color-neutral-700);">Untis MultiUser DB:</strong>
+            <template v-if="untisStatus.loading">
+              <wa-icon name="arrow-clockwise" class="spin" style="color: var(--wa-color-neutral-500);"></wa-icon>
+              <span style="color: var(--wa-color-neutral-600);">Clients werden geprüft...</span>
+            </template>
+            <template v-else-if="untisStatus.error">
+              <wa-icon name="exclamation-triangle" style="color: var(--wa-color-warning-600);"></wa-icon>
+              <span style="color: var(--wa-color-warning-700);">Status konnte nicht ermittelt werden: {{ untisStatus.error }}</span>
+            </template>
+            <template v-else-if="untisStatus.active">
+              <wa-icon name="x-circle-fill" style="color: var(--wa-color-danger-600);"></wa-icon>
+              <span style="color: var(--wa-color-danger-700); font-weight: 500;">
+                {{ untisStatus.count }} Untis-Client(s) aktiv eingeloggt. Umbenennung blockiert.
+              </span>
+            </template>
+            <template v-else>
+              <wa-icon name="check-circle-fill" style="color: var(--wa-color-success-600);"></wa-icon>
+              <span style="color: var(--wa-color-success-700);">Keine Untis-Clients eingeloggt (Bereit zur Umbenennung)</span>
+            </template>
+          </div>
+          <wa-button variant="text" size="small" @click="fetchUntisStatus" :disabled="untisStatus.loading" style="padding: 0; min-height: auto;">
+            <wa-icon name="arrow-clockwise" :class="{ spin: untisStatus.loading }"></wa-icon>
+          </wa-button>
         </div>
-        <wa-button variant="text" size="small" @click="fetchUntisStatus" :disabled="untisStatus.loading" style="padding: 0; min-height: auto;">
-          <wa-icon name="arrow-clockwise" :class="{ spin: untisStatus.loading }"></wa-icon>
-        </wa-button>
+
+        <!-- Active Untis Sessions List -->
+        <div v-if="untisStatus.active && untisStatus.sessions && untisStatus.sessions.length" style="margin-top: 0.6rem; padding: 0.5rem 0.75rem; background: var(--wa-color-danger-50); border: 1px solid var(--wa-color-danger-200); border-radius: 6px;">
+          <div style="font-weight: 600; color: var(--wa-color-danger-900); margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.35rem;">
+            <wa-icon name="person-fill-lock" style="font-size: 1rem; color: var(--wa-color-danger-600);"></wa-icon>
+            <span>Aktive Untis-Benutzer:</span>
+          </div>
+          <ul style="margin: 0; padding-left: 1.25rem; color: var(--wa-color-danger-800); line-height: 1.5;">
+            <li v-for="(sess, i) in untisStatus.sessions" :key="i">
+              <strong>{{ sess.user }}</strong>
+              <span v-if="sess.osUser || sess.workstation" style="color: var(--wa-color-neutral-700);">
+                ({{ [sess.osUser, sess.workstation].filter(Boolean).join(' an ') }})
+              </span>
+              <span v-if="sess.loginAt" style="color: var(--wa-color-neutral-600); margin-left: 0.25rem;">
+                – angemeldet seit {{ sess.loginAt }}
+              </span>
+            </li>
+          </ul>
+        </div>
       </div>
 
       <!-- Konsequenzen & bekannte Probleme Box -->
@@ -210,6 +231,7 @@ const untisStatus = ref({
   loading: false,
   active: false,
   count: 0,
+  sessions: [],
   error: ''
 });
 
@@ -247,6 +269,7 @@ async function fetchUntisStatus() {
     const res = await axios.get('/api/untis/active-clients');
     untisStatus.value.active = !!res.data?.active;
     untisStatus.value.count = Number(res.data?.count) || 0;
+    untisStatus.value.sessions = Array.isArray(res.data?.sessions) ? res.data.sessions : [];
   } catch (e) {
     untisStatus.value.error = e.response?.data?.error || e.message;
   } finally {

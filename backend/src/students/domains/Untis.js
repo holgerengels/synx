@@ -125,20 +125,47 @@ class Untis extends ManagableDomain {
     }
 
     /**
-     * Checks if any Untis clients are currently logged in.
-     * @returns {Promise<{active: boolean, count: number}>}
+     * Checks if any Untis clients are currently logged in and returns active session details.
+     * @returns {Promise<{active: boolean, count: number, sessions: Array<{user: string, workstation: string, osUser: string, loginAt: string}>}>}
      */
     async hasActiveClients() {
         let connection;
         try {
             connection = await mysql.createConnection(this.dbConfig);
             const [rows] = await connection.execute(
-                "SELECT COUNT(*) AS activeCount FROM User WHERE LoggedIn = 1"
+                "SELECT USER_ID, Name, UserInfo, LogInDate, LogInTime FROM User WHERE LoggedIn = 1"
             );
-            const count = rows && rows[0] ? Number(rows[0].activeCount) : 0;
+            const sessions = (rows || []).map(r => {
+                let workstation = '';
+                let osUser = '';
+                if (r.UserInfo) {
+                    const clean = String(r.UserInfo).replace(/\0/g, '').trim();
+                    const parts = clean.split('~');
+                    workstation = parts[2] || '';
+                    osUser = parts[3] || '';
+                }
+                let loginAt = '';
+                if (r.LogInDate) {
+                    const d = String(r.LogInDate);
+                    const t = r.LogInTime !== undefined && r.LogInTime !== null ? String(r.LogInTime).padStart(4, '0') : '';
+                    if (d.length === 8) {
+                        const dateFormatted = `${d.substring(6, 8)}.${d.substring(4, 6)}.${d.substring(0, 4)}`;
+                        const timeFormatted = t.length >= 4 ? `${t.substring(0, 2)}:${t.substring(2, 4)}` : t;
+                        loginAt = timeFormatted ? `${dateFormatted} ${timeFormatted}` : dateFormatted;
+                    }
+                }
+                return {
+                    user: r.Name || 'Unbekannt',
+                    workstation,
+                    osUser,
+                    loginAt
+                };
+            });
+
             return {
-                active: count > 0,
-                count: count
+                active: sessions.length > 0,
+                count: sessions.length,
+                sessions: sessions
             };
         } catch (e) {
             console.error('Untis hasActiveClients failed', e);
