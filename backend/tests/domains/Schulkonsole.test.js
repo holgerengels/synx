@@ -251,6 +251,7 @@ describe('Schulkonsole and SchulkonsoleTeacher Re-authentication', () => {
         expect(createdClassPayload.name).toBe('10a'); // must be lowercase
         expect(createdStudentPayload).not.toBeNull();
         expect(createdStudentPayload.schoolClass).toBe('42');
+        expect(createdStudentPayload.email).toBe('max123@musterschule.schule.paedml');
         expect(Schulkonsole.classes['10a']).toBe(42);
         expect(Schulkonsole.studentIds['max123']).toBe(999);
     });
@@ -298,6 +299,7 @@ describe('Schulkonsole and SchulkonsoleTeacher Re-authentication', () => {
         expect(createdClassPayload.name).toBe('05b'); // must be lowercase
         expect(updatedStudentPayload).not.toBeNull();
         expect(updatedStudentPayload.schoolClass).toBe('84');
+        expect(updatedStudentPayload.email).toBe('max123@musterschule.schule.paedml');
         expect(Schulkonsole.classes['05b']).toBe(84);
     });
 

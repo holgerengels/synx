@@ -24,6 +24,10 @@
         {
           "name": "Kennwortablauf aufheben",
           "run": "paedml-fix-password-expiration"
+        },
+        {
+          "name": "E-Mail-Adressen setzen",
+          "run": "paedml-set-email"
         }
       ],
       "color": "#00965E"
@@ -250,6 +254,12 @@
       "description": "Hebt das Kennwortablaufdatum für Schüler*innen im Active Directory/LDAP auf.",
       "class": "PaedmlFixPasswordExpirationTask",
       "schedule": "10 7-18 * * *"
+    },
+    {
+      "name": "paedml-set-email",
+      "titel": "Schulkonsole E-Mail-Adressen setzen",
+      "description": "Setzt die Pseudo-E-Mail-Adresse (@musterschule.schule.paedml) für Schüler*innen im Active Directory / Schulkonsole.",
+      "class": "PaedmlSetEmailTask"
     },
     {
       "name": "rename-userid",

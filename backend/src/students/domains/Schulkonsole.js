@@ -6,7 +6,7 @@ const ManagableDomain = require('../../domains/ManagableDomain');
 const { formatSchulkonsoleError } = require('./schulkonsoleErrorUtils');
 
 class Schulkonsole extends ManagableDomain {
-    get supportedProperties() { return ['userId', 'firstName', 'lastName', 'clazz']; }
+    get supportedProperties() { return ['userId', 'firstName', 'lastName', 'clazz', 'email']; }
     get cacheTTL() { return 3600000; } // 1 hour
 
     constructor() {
@@ -25,6 +25,9 @@ class Schulkonsole extends ManagableDomain {
         if (!this.user || !this.password) {
             throw new Error('Schulkonsole configuration incomplete. Missing user or password.');
         }
+
+        this.emailDomain = c.emailDomain;
+        if (!this.emailDomain) throw new Error('Schulkonsole emailDomain missing');
 
         this.axiosInstance = axios.create({
             httpsAgent: new https.Agent({ rejectUnauthorized: false })
@@ -115,7 +118,8 @@ class Schulkonsole extends ManagableDomain {
                     r.surname,
                     {
                         id: r.id,
-                        clazz: (className || '').toUpperCase()
+                        clazz: (className || '').toUpperCase(),
+                        email: r.email || null
                     }
                 );
             });
@@ -179,7 +183,7 @@ class Schulkonsole extends ManagableDomain {
             isInternetLocked: false, isDeactivated: false, homeDirectory: "",
             password: config.schulkonsole?.initialPassword || "Start123!",
             passwordPolicy: config.schulkonsole?.passwordPolicy || "2",
-            email: `${identity.userId}@musterschule.schule.paedml`
+            email: identity.email || `${identity.userId}@${this.emailDomain}`
         };
 
         try {
@@ -217,7 +221,8 @@ class Schulkonsole extends ManagableDomain {
             userName: identity.userId, givenName: identity.firstName, surname: identity.lastName,
             schoolClass: classId ? classId.toString() : "",
             isInternetLocked: false, isDeactivated: false,
-            homeDirectory: `\\\\SP01\\MLData\\Benutzer\\SUS\\${identity.userId}`
+            homeDirectory: `\\\\SP01\\MLData\\Benutzer\\SUS\\${identity.userId}`,
+            email: identity.email || `${identity.userId}@${this.emailDomain}`
         };
 
         try {

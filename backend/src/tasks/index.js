@@ -22,6 +22,7 @@ const registry = {
     'matrix-moodle-courses': new (require('../students/tasks/MatrixMoodleCoursesTask'))(),
     'matrix-reconcile-users': new (require('../students/tasks/MatrixReconcileUsersTask'))(),
     'paedml-fix-password-expiration': new (require('../students/tasks/PaedmlFixPasswordExpirationTask'))(),
+    'paedml-set-email': new (require('../students/tasks/PaedmlSetEmailTask'))(),
     'rename-userid': new (require('../students/tasks/RenameUserIdTask'))()
 };
 
