@@ -46,6 +46,10 @@
         {
           "name": "Volljährigkeit",
           "run": "web-untis-majority"
+        },
+        {
+          "name": "Benutzergruppen",
+          "run": "web-untis-group-sync"
         }
       ],
       "color": "#FF7A00"
@@ -206,6 +210,13 @@
       "description": "Aktualisiert den Status zur Volljährigkeit der Schüler:innen in WebUntis.",
       "class": "WebUntisMajorityTask",
       "schedule": "5 5 * * *"
+    },
+    {
+      "name": "web-untis-group-sync",
+      "titel": "WebUntis Benutzergruppen syncen",
+      "description": "Ordnet Schüler*innen Ü18 ohne Attestpflicht der Gruppe 'Schüler*innen Ü18' zu, alle anderen der Gruppe 'Schüler*innen'.",
+      "class": "WebUntisGroupSyncTask",
+      "schedule": "0 5 * * *"
     },
     {
       "name": "nextcloud-remnants-list",

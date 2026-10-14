@@ -14,6 +14,7 @@ const registry = {
     'web-untis-set-exit-dates': new (require('../students/tasks/WebUntisSetExitDatesTask'))(),
     'web-untis-guardian-sync': new (require('../students/tasks/WebUntisGuardianSyncTask'))(),
     'web-untis-majority': new (require('../students/tasks/WebUntisMajorityTask'))(),
+    'web-untis-group-sync': new (require('../students/tasks/WebUntisGroupSyncTask'))(),
     'nextcloud-remnants-list': new (require('../students/tasks/NextcloudRemnantsListTask'))(),
     'nextcloud-remnants-purge': new (require('../students/tasks/NextcloudRemnantsPurgeTask'))(),
     'fachnetz-profile-maintenance': new (require('../fachnetz/tasks/ProfileMaintenanceTask'))(),

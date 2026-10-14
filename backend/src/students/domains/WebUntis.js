@@ -230,11 +230,14 @@ class WebUntisDomain extends ManagableDomain {
 
         // WebUntis requires initial GET for JSESSIONID before POSTing spring security check.
         // The school parameter must be present on this initial request to bind the session.
-        const initUrl = this.school ? `${this.url}?school=${this.school}` : this.url;
+        const initUrl = this.school
+            ? `${this.url}index.do?school=${encodeURIComponent(this.school)}`
+            : `${this.url}index.do`;
         console.log(`[WebUntis] Initial session request: GET ${initUrl}`);
         await client.get(initUrl, { validateStatus: false });
 
         const params = new URLSearchParams();
+        if (this.school) params.append('school', this.school);
         params.append('j_username', this.user);
         params.append('j_password', this.password);
         if (token) params.append('token', token);
@@ -261,7 +264,9 @@ class WebUntisDomain extends ManagableDomain {
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 console.log(`[WebUntis] Requesting ${label} (attempt ${attempt}/${maxAttempts}): GET ${url}`);
-                const genRes = await client.get(url);
+                const genRes = await client.get(url, {
+                    headers: { Accept: 'application/json' }
+                });
                 console.log(`[WebUntis] ${label} response status: ${genRes.status}, data:`, typeof genRes.data === 'object' ? JSON.stringify(genRes.data) : String(genRes.data).substring(0, 500));
                 if (!genRes.data) {
                     console.error(`[WebUntis] genRes.data is undefined for ${label}!`);
@@ -322,11 +327,16 @@ class WebUntisDomain extends ManagableDomain {
 
         // Parse headers
         let majorityColIdx = -1;
+        let medicalReportDutyColIdx = -1;
         if (lines.length > 0) {
             const headers = parseCsvLine(lines[0].trim());
             majorityColIdx = headers.indexOf('majority');
             if (majorityColIdx === -1) {
                 console.warn('[WebUntis Info] "majority" column missing in WebUntis CSV export headers. Automatic majority resolving disabled.');
+            }
+            medicalReportDutyColIdx = headers.indexOf('medicalReportDuty');
+            if (medicalReportDutyColIdx === -1) {
+                console.warn('[WebUntis Info] "medicalReportDuty" column missing in WebUntis CSV export headers.');
             }
         }
 
@@ -348,6 +358,12 @@ class WebUntisDomain extends ManagableDomain {
                 if (majorityColIdx !== -1 && cols.length > majorityColIdx) {
                     const val = cols[majorityColIdx] ? cols[majorityColIdx].toLowerCase() : '';
                     majorityFlag = (val === 'true');
+                }
+
+                let medicalReportDutyFlag = false;
+                if (medicalReportDutyColIdx !== -1 && cols.length > medicalReportDutyColIdx) {
+                    const val = cols[medicalReportDutyColIdx] ? cols[medicalReportDutyColIdx].toLowerCase() : '';
+                    medicalReportDutyFlag = (val === 'true' || val === '1' || val === 'ja');
                 }
 
                 if (lastName === 'Tester_Schüler' || accountId === 'Tester_Schüler') {
@@ -388,7 +404,8 @@ class WebUntisDomain extends ManagableDomain {
                         gender: normGender,
                         clazz,
                         birthday,
-                        majority: majorityFlag
+                        majority: majorityFlag,
+                        medicalReportDuty: medicalReportDutyFlag
                     }
                 ));
             }
@@ -742,6 +759,191 @@ class WebUntisDomain extends ManagableDomain {
             throw new Error(formatted);
         }
     }
+
+    async readUserGroups() {
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const res = await client.get(`${this.url}usergrouplist.do`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        const groups = [];
+        const seen = new Set();
+        const pattern = /loadContent\('usergroupform\?selId=(\d+)'\);void\(0\);"[^>]*>\s*([^<]+?)\s*<\/a>/g;
+
+        for (const match of html.matchAll(pattern)) {
+            const id = Number(match[1]);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            groups.push({ id, name: unescapeHtml(match[2]).trim() });
+        }
+        return groups;
+    }
+
+    async readUserGroup(id) {
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const res = await client.get(`${this.url}usergroupform.do?selId=${id}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+
+        const props = extractWidgetProps(html);
+        const fields = collectFormFields(html);
+        const byName = Object.fromEntries(fields);
+
+        const options = props.options || [];
+        const optionsById = new Map(options.map((o) => [o.id, o]));
+
+        return {
+            id: Number(byName.id ?? id),
+            name: byName.name ?? '',
+            lastUpdate: byName.lastUpdate ?? '0',
+            csrf: byName._csrf ?? '',
+            memberIds: props.selectedIds || [],
+            options,
+            optionsById,
+            memberFieldName: props.hiddenFieldName || 'userIds',
+            fields
+        };
+    }
+
+    async writeUserGroupMembers(group, memberIds, { name, allowEmpty = false } = {}) {
+        if (memberIds.length === 0 && group.memberIds?.length > 0 && !allowEmpty) {
+            throw new Error(`Refusing to empty group '${group.name}' — pass { allowEmpty: true } if intended.`);
+        }
+
+        const payload = new URLSearchParams();
+        for (const [key, value] of group.fields) {
+            if (!['id', 'lastUpdate', 'name', group.memberFieldName].includes(key)) {
+                payload.append(key, value);
+            }
+        }
+
+        payload.append('id', String(group.id));
+        payload.append('lastUpdate', String(group.lastUpdate));
+        payload.append('name', name ?? group.name);
+        payload.append('change', 'change');
+        for (const id of memberIds) {
+            payload.append(group.memberFieldName, String(id));
+        }
+
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const res = await client.post(`${this.url}usergroupform.do?selId=${group.id}`, payload.toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': group.csrf
+            }
+        });
+
+        const resBody = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        const errors = [...resBody.matchAll(/setError\('([^']+)','([^']+)'/g)]
+            .map(([, field, message]) => `${field}: ${message}`);
+        if (errors.length > 0) {
+            throw new Error(`WebUntis rejected the group update: ${errors.join('; ')}`);
+        }
+
+        let json = typeof res.data === 'object' ? res.data : null;
+        if (!json && typeof res.data === 'string' && res.data.trim().startsWith('{')) {
+            try { json = JSON.parse(res.data.trim()); } catch {}
+        }
+        if (json && json.success === false) {
+            const detail = (json.errors || []).map((e) => e.message || e.id || String(e)).join('; ');
+            throw new Error(`WebUntis rejected the group update${detail ? `: ${detail}` : ''}`);
+        }
+        if (res.status >= 400) {
+            throw new Error(`WebUntis group update failed with HTTP ${res.status}`);
+        }
+
+        return { status: res.status, memberCount: memberIds.length };
+    }
+}
+
+const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+function unescapeHtml(text) {
+    return String(text).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, entity) => {
+        if (entity[0] === '#') {
+            const code = entity[1] === 'x' || entity[1] === 'X'
+                ? parseInt(entity.slice(2), 16)
+                : parseInt(entity.slice(1), 10);
+            return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        }
+        return HTML_ENTITIES[entity.toLowerCase()] ?? match;
+    });
+}
+
+function collectFormFields(html) {
+    const fields = [];
+    for (const match of html.matchAll(/<input\b([^>]*)>/gi)) {
+        const attrs = match[1];
+        const nameMatch = /\bname\s*=\s*"([^"]*)"/i.exec(attrs);
+        if (!nameMatch) continue;
+        const name = nameMatch[1];
+        const typeMatch = /\btype\s*=\s*"([^"]*)"/i.exec(attrs);
+        const type = (typeMatch ? typeMatch[1] : 'text').toLowerCase();
+        const valueMatch = /\bvalue\s*=\s*"([^"]*)"/i.exec(attrs);
+        const value = unescapeHtml(valueMatch ? valueMatch[1] : '');
+
+        if (type === 'checkbox' || type === 'radio') {
+            if (/\schecked\b/i.test(attrs)) fields.push([name, value]);
+        } else if (type !== 'submit' && type !== 'button') {
+            fields.push([name, value]);
+        }
+    }
+
+    for (const match of html.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)) {
+        const nameMatch = /\bname\s*=\s*"([^"]*)"/i.exec(match[1]);
+        if (!nameMatch) continue;
+        const name = nameMatch[1];
+        const body = match[2];
+        const selected =
+            /<option[^>]*\bselected\b[^>]*value="([^"]*)"/i.exec(body) ||
+            /<option[^>]*value="([^"]*)"[^>]*\bselected\b/i.exec(body) ||
+            /<option[^>]*value="([^"]*)"/i.exec(body);
+        fields.push([name, selected ? unescapeHtml(selected[1]) : '']);
+    }
+
+    return fields;
+}
+
+function extractWidgetProps(html) {
+    const start = html.indexOf('grupet/widget/FilteredMultiSelect');
+    if (start === -1) return {};
+
+    const attrMatch = /data-dojo-props="([\s\S]*?)"\s*(?:id=|name=|>)/.exec(html.slice(start));
+    if (!attrMatch) return {};
+    const props = unescapeHtml(attrMatch[1]);
+
+    const result = {};
+    const selected = /selectedIds:\s*\[([^\]]*)\]/.exec(props);
+    result.selectedIds = selected
+        ? selected[1]
+            .split(',')
+            .map((x) => x.trim())
+            .filter((x) => x !== '')
+            .map(Number)
+            .filter(Number.isFinite)
+        : [];
+
+    const options = /options:\s*(\[[\s\S]*?\]),\s*selectedIds/.exec(props);
+    if (options) {
+        try {
+            result.options = JSON.parse(options[1]);
+        } catch {
+            result.options = [];
+        }
+    }
+
+    const hidden = /hiddenFieldName:\s*'([^']+)'/.exec(props);
+    result.hiddenFieldName = hidden ? hidden[1] : 'userIds';
+
+    return result;
 }
 
 module.exports = new WebUntisDomain();
