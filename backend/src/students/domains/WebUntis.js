@@ -862,6 +862,134 @@ class WebUntisDomain extends ManagableDomain {
 
         return { status: res.status, memberCount: memberIds.length };
     }
+
+    async getRestToken({ refresh = false } = {}) {
+        if (!refresh && this._bearerToken && Date.now() - (this._bearerTokenAt || 0) < 12 * 60 * 1000) {
+            return this._bearerToken;
+        }
+
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const tokenUrl = `${this.url}api/token/new`;
+        const res = await client.get(tokenUrl, {
+            headers: { Accept: '*/*' },
+            validateStatus: () => true
+        });
+
+        const token = (typeof res.data === 'string' ? res.data : JSON.stringify(res.data)).trim();
+        if (res.status !== 200 || !token.startsWith('eyJ')) {
+            throw new Error(`Could not obtain WebUntis REST token (HTTP ${res.status}): ${token.substring(0, 100)}`);
+        }
+
+        this._bearerToken = token;
+        this._bearerTokenAt = Date.now();
+        return token;
+    }
+
+    async requestRestJson(method, path, body, { retryOn401 = true } = {}) {
+        const token = await this.getRestToken();
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+        const fullUrl = path.startsWith('http') ? path : `${this.url}${cleanPath}`;
+
+        const res = await client.request({
+            method,
+            url: fullUrl,
+            data: body,
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+                ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
+            },
+            validateStatus: () => true
+        });
+
+        if (res.status === 401 && retryOn401) {
+            console.log('[WebUntis] REST token rejected (401) — renewing token...');
+            await this.getRestToken({ refresh: true });
+            return this.requestRestJson(method, path, body, { retryOn401: false });
+        }
+
+        return { status: res.status, data: res.data };
+    }
+
+    async readSchoolYearRange(now = new Date()) {
+        const today = now.toISOString().slice(0, 10);
+        try {
+            const res = await this.requestRestJson('GET', 'api/rest/view/v1/schoolyears');
+            const years = Array.isArray(res.data) ? res.data : [];
+            const current = years.find((y) => y.dateRange?.start <= today && today <= y.dateRange?.end);
+            if (current && current.dateRange?.start) {
+                return { start: current.dateRange.start, end: today };
+            }
+        } catch (err) {
+            console.warn(`[WebUntis] School years not available (${err.message}) — using fallback start`);
+        }
+        const year = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+        return { start: `${year}-08-01`, end: today };
+    }
+
+    async readOpenPeriods(dateRange) {
+        const res = await this.requestRestJson('POST', 'api/rest/view/v1/classreg/open-periods', {
+            filter: 'TOPIC_OR_ABSENCE_OPEN',
+            dateRange: { start: dateRange.start, end: dateRange.end }
+        });
+        if (res.status !== 200 || !Array.isArray(res.data?.periods)) {
+            throw new Error(`Open periods could not be read (HTTP ${res.status}): ${JSON.stringify(res.data || '')}`);
+        }
+        return res.data.periods;
+    }
+
+    async writeLessonTopic(periodId, text = '---') {
+        const res = await this.requestRestJson('PUT', 'api/rest/view/v1/classreg/lesson-topics', {
+            forceBlock: false,
+            topic: { periodId, text, attachments: [] }
+        });
+        if (res.status !== 200 || !Array.isArray(res.data?.topics)) {
+            throw new Error(`Lesson topic rejected (HTTP ${res.status}): ${JSON.stringify(res.data || '')}`);
+        }
+        return res.data.topics;
+    }
+
+    async markAbsencesChecked(periodId) {
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const path = `classregpage.do?ttid=${periodId}&isBlockSelected=false&request.preventCache=${Date.now()}`;
+        const getRes = await client.get(`${this.url}${path}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const html = typeof getRes.data === 'string' ? getRes.data : JSON.stringify(getRes.data);
+        const fields = collectFormFields(html);
+        const csrf = Object.fromEntries(fields)._csrf || '';
+
+        const payload = new URLSearchParams();
+        for (const [k, v] of fields) {
+            payload.append(k, v);
+        }
+        payload.append('absencechecked', 'absencechecked');
+
+        const postRes = await client.post(`${this.url}classregpage.do?ttid=${periodId}&isBlockSelected=false`, payload.toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrf
+            }
+        });
+
+        let json = typeof postRes.data === 'object' ? postRes.data : null;
+        if (!json && typeof postRes.data === 'string' && postRes.data.trim().startsWith('{')) {
+            try { json = JSON.parse(postRes.data.trim()); } catch {}
+        }
+        if (!json || json.success !== true) {
+            throw new Error(`Absence check rejected (HTTP ${postRes.status}): ${JSON.stringify(postRes.data || '')}`);
+        }
+        const checked = Array.isArray(json.args?.[0]) ? json.args[0] : [periodId];
+        return checked;
+    }
 }
 
 const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };

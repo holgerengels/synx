@@ -15,6 +15,7 @@ const registry = {
     'web-untis-guardian-sync': new (require('../students/tasks/WebUntisGuardianSyncTask'))(),
     'web-untis-majority': new (require('../students/tasks/WebUntisMajorityTask'))(),
     'web-untis-group-sync': new (require('../students/tasks/WebUntisGroupSyncTask'))(),
+    'web-untis-classreg-cleanup': new (require('../students/tasks/WebUntisClassregCleanupTask'))(),
     'nextcloud-remnants-list': new (require('../students/tasks/NextcloudRemnantsListTask'))(),
     'nextcloud-remnants-purge': new (require('../students/tasks/NextcloudRemnantsPurgeTask'))(),
     'fachnetz-profile-maintenance': new (require('../fachnetz/tasks/ProfileMaintenanceTask'))(),

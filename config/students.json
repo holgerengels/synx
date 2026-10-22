@@ -50,6 +50,10 @@
         {
           "name": "Benutzergruppen",
           "run": "web-untis-group-sync"
+        },
+        {
+          "name": "Offene Stunden schließen",
+          "run": "web-untis-classreg-cleanup"
         }
       ],
       "color": "#FF7A00"
@@ -217,6 +221,13 @@
       "description": "Ordnet Schüler*innen Ü18 ohne Attestpflicht der Gruppe 'Schüler*innen Ü18' zu, alle anderen der Gruppe 'Schüler*innen'.",
       "class": "WebUntisGroupSyncTask",
       "schedule": "0 5 * * *"
+    },
+    {
+      "name": "web-untis-classreg-cleanup",
+      "titel": "WebUntis Offene Stunden schließen",
+      "description": "Schließt offene Klassenbucheinträge ohne echte Lehrkraft (z.B. o.L., kein L., LB, !!).",
+      "class": "WebUntisClassregCleanupTask",
+      "schedule": "0 1 * * *"
     },
     {
       "name": "nextcloud-remnants-list",
