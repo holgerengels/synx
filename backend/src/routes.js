@@ -378,16 +378,59 @@ router.post('/sync/:source/:target', verifyToken, async (req, res) => {
     }
 });
 
+// Logs distinct tasks list
+router.get('/logs/tasks', verifyToken, async (req, res) => {
+    try {
+        const Log = require('./models/Log');
+        const loggedTasks = await Log.distinct('task');
+        const tasksRegistry = require('./tasks');
+        const config = require('./config');
+        const configTasks = (config.tasks || []).map(t => t.name).filter(Boolean);
+        const set = new Set([...loggedTasks, ...Object.keys(tasksRegistry), ...configTasks]);
+        const allTasks = Array.from(set).filter(Boolean).sort();
+        res.json(allTasks);
+    } catch (e) {
+        console.error('[Route] GET /logs/tasks failed:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Logs API
 router.get('/logs', verifyToken, async (req, res) => {
     try {
         const Log = require('./models/Log');
-        const limit = parseInt(req.query.limit) || 50;
-        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 200);
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
         const skip = (page - 1) * limit;
 
-        const total = await Log.countDocuments();
-        const logs = await Log.find().sort({ startTime: -1 }).skip(skip).limit(limit);
+        const query = {};
+
+        if (req.query.task) {
+            query.task = req.query.task;
+        }
+
+        if (req.query.trigger) {
+            query.trigger = req.query.trigger;
+        }
+
+        if (req.query.status) {
+            query.status = req.query.status;
+        }
+
+        if (req.query.search && typeof req.query.search === 'string') {
+            const trimmed = req.query.search.trim();
+            if (trimmed) {
+                const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(escaped, 'i');
+                query.$or = [
+                    { task: regex },
+                    { summaryHtml: regex }
+                ];
+            }
+        }
+
+        const total = await Log.countDocuments(query);
+        const logs = await Log.find(query).sort({ startTime: -1 }).skip(skip).limit(limit);
 
         res.json({
             data: logs,

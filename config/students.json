@@ -24,6 +24,10 @@
         {
           "name": "Kennwortablauf aufheben",
           "run": "paedml-fix-password-expiration"
+        },
+        {
+          "name": "E-Mail-Adressen setzen",
+          "run": "paedml-set-email"
         }
       ],
       "color": "#00965E"
@@ -42,6 +46,14 @@
         {
           "name": "Volljährigkeit",
           "run": "web-untis-majority"
+        },
+        {
+          "name": "Benutzergruppen",
+          "run": "web-untis-group-sync"
+        },
+        {
+          "name": "Offene Stunden schließen",
+          "run": "web-untis-classreg-cleanup"
         }
       ],
       "color": "#FF7A00"
@@ -204,6 +216,20 @@
       "schedule": "5 5 * * *"
     },
     {
+      "name": "web-untis-group-sync",
+      "titel": "WebUntis Benutzergruppen syncen",
+      "description": "Ordnet Schüler*innen Ü18 ohne Attestpflicht der Gruppe 'Schüler*innen Ü18' zu, alle anderen der Gruppe 'Schüler*innen'.",
+      "class": "WebUntisGroupSyncTask",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "name": "web-untis-classreg-cleanup",
+      "titel": "WebUntis Offene Stunden schließen",
+      "description": "Schließt offene Klassenbucheinträge ohne echte Lehrkraft (z.B. o.L., kein L., LB, !!).",
+      "class": "WebUntisClassregCleanupTask",
+      "schedule": "0 1 * * *"
+    },
+    {
       "name": "nextcloud-remnants-list",
       "titel": "NextCloud Karteileichen auflisten",
       "description": "Listet verwaiste NextCloud-Ordner und Karteileichen auf.",
@@ -250,6 +276,12 @@
       "description": "Hebt das Kennwortablaufdatum für Schüler*innen im Active Directory/LDAP auf.",
       "class": "PaedmlFixPasswordExpirationTask",
       "schedule": "10 5 * * 0"
+    },
+    {
+      "name": "paedml-set-email",
+      "titel": "Schulkonsole E-Mail-Adressen setzen",
+      "description": "Setzt die Pseudo-E-Mail-Adresse (@musterschule.schule.paedml) für Schüler*innen im Active Directory / Schulkonsole.",
+      "class": "PaedmlSetEmailTask"
     },
     {
       "name": "rename-userid",

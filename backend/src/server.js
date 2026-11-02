@@ -25,7 +25,7 @@ if (config.domains) {
 }
 
 // Connect to MongoDB for logging
-const mongoUri = config.mongodb?.uri || 'mongodb://localhost:27017/synx_logs';
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || config.mongodb?.uri || 'mongodb://localhost:27017/synx_logs';
 mongoose.connect(mongoUri)
     .then(() => console.log('Connected to MongoDB Logging Database'))
     .catch(err => console.error('MongoDB connection error:', err.message));

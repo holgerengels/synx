@@ -7,6 +7,58 @@ const config = require('../../config');
 const ManagableDomain = require('../../domains/ManagableDomain');
 const { parseCsvLine } = require('../../utils/csvParser');
 
+function formatAxiosError(err, context = 'WebUntis request failed') {
+    if (!err) return context;
+
+    const method = (err.config?.method || 'GET').toUpperCase();
+    const url = err.config?.url || '';
+    const status = err.response?.status;
+    const statusText = err.response?.statusText || '';
+
+    let callInfo = url ? `[${method} ${url}]` : '';
+    let details = `${context} ${callInfo}`.trim();
+
+    if (status) {
+        details += ` -> HTTP ${status} ${statusText}`.trim();
+    } else if (err.code) {
+        details += ` -> ${err.code}: ${err.message}`;
+    } else {
+        details += ` -> ${err.message}`;
+    }
+
+    if (err.config?.params) {
+        try {
+            details += ` | Params: ${JSON.stringify(err.config.params)}`;
+        } catch (_) {}
+    }
+
+    if (err.response?.data) {
+        let respData = err.response.data;
+        if (typeof respData === 'object') {
+            try {
+                respData = JSON.stringify(respData);
+            } catch (_) {
+                respData = String(respData);
+            }
+        } else if (typeof respData === 'string') {
+            const trimmed = respData.trim();
+            if (trimmed.startsWith('<')) {
+                const titleMatch = trimmed.match(/<title[^>]*>([^<]*)<\/title>/i);
+                const title = titleMatch ? `[Title: ${titleMatch[1].trim()}] ` : '';
+                const bodyText = trimmed.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                respData = (title + bodyText).substring(0, 300);
+            } else {
+                respData = trimmed.substring(0, 300);
+            }
+        }
+        if (respData) {
+            details += ` | Response: ${respData}`;
+        }
+    }
+
+    return details;
+}
+
 class WebUntisDomain extends ManagableDomain {
     get supportedProperties() { return ['userId', 'firstName', 'lastName', 'clazz', 'birthday']; }
     get cacheTTL() { return 3600000; } // 1 hour
@@ -37,38 +89,78 @@ class WebUntisDomain extends ManagableDomain {
     }
 
     /**
-     * Poll for a WebUntis report until CSV data is returned.
-     * WebUntis generates reports asynchronously — the initial request returns a messageId,
-     * and the report may not be ready immediately.
+     * Fetch report CSV, either directly if reportParams is already provided,
+     * or by polling WebUntis's polling endpoint (/api/polling/REPORT) until the report job finishes.
      * 
      * @param {object} client - authenticated axios client
-     * @param {string} messageId - report message ID from the generation request
-     * @param {string} reportParams - query parameters for the report
+     * @param {string|number} messageId - report message ID from the generation request
+     * @param {string} reportParams - query parameters for the report (if already available)
      * @param {string} label - human-readable label for logging
+     * @param {object} reportMeta - { reportName, format }
      * @returns {string} CSV content
      */
-    async _pollReport(client, messageId, reportParams, label = 'report') {
-        const maxAttempts = 5;
-        const delays = [2000, 4000, 6000, 8000, 10000]; // escalating wait times
-
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            const delay = delays[attempt - 1] || 10000;
-            await new Promise(r => setTimeout(r, delay));
-
-            const res = await client.get(this.url + this.reportPath + '?msgId=' + messageId + '&' + reportParams);
-            const data = res.data;
-
-            if (typeof data === 'string' && data.trim().length > 0) {
-                if (attempt > 1) {
-                    console.log(`[WebUntis] ${label} ready after attempt ${attempt} (${delays.slice(0, attempt).reduce((a, b) => a + b, 0) / 1000}s total)`);
-                }
-                return data;
+    async _pollReport(client, messageId, reportParams, label = 'report', reportMeta = {}) {
+        // 1. If reportParams is already available (synchronous report like Student), download directly
+        if (reportParams) {
+            const fetchUrl = this.url + this.reportPath + `?msgId=${messageId}&${reportParams}`;
+            console.log(`[WebUntis] ${label} ready immediately. Fetching content: GET ${fetchUrl}`);
+            const fetchRes = await client.get(fetchUrl);
+            if (typeof fetchRes.data === 'string' && fetchRes.data.trim().length > 0) {
+                return fetchRes.data;
             }
-
-            console.warn(`[WebUntis] ${label} not ready after ${delay / 1000}s (attempt ${attempt}/${maxAttempts}). Retrying...`);
         }
 
-        throw new Error(`WebUntis ${label} did not become ready after ${maxAttempts} attempts. Server may be overloaded.`);
+        // 2. Otherwise poll WebUntis polling API: /api/polling/REPORT
+        const maxAttempts = 15;
+        const delays = [2000, 3000, 4000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000];
+        const pollingUrl = this.url + 'api/polling/REPORT';
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const delay = delays[attempt - 1] || 5000;
+            await new Promise(r => setTimeout(r, delay));
+
+            console.log(`[WebUntis] Polling ${label} via ${pollingUrl} (attempt ${attempt}/${maxAttempts})...`);
+            try {
+                const pollRes = await client.get(pollingUrl);
+                const pollingData = pollRes.data?.data;
+                const jobs = pollingData?.pollingJobs || [];
+
+                // Find matching job (by reportName if available, or first finished job)
+                const job = (reportMeta.reportName
+                    ? jobs.find(j => j.data?.reportName === reportMeta.reportName)
+                    : null) || jobs[0];
+
+                if (job) {
+                    console.log(`[WebUntis] ${label} job status: isJobFinished=${job.isJobFinished}, hasJobError=${job.hasJobError}`);
+                    if (job.hasJobError) {
+                        throw new Error(`WebUntis reported error during generation of ${label}: ${JSON.stringify(job)}`);
+                    }
+
+                    if (job.isJobFinished && job.data?.reportParams) {
+                        const downloadMsgId = job.data.messageId !== undefined ? job.data.messageId : messageId;
+                        const fetchUrl = this.url + this.reportPath + `?msgId=${downloadMsgId}&${job.data.reportParams}`;
+                        console.log(`[WebUntis] ${label} finished on server! Fetching content: GET ${fetchUrl}`);
+                        const fetchRes = await client.get(fetchUrl);
+                        if (typeof fetchRes.data === 'string' && fetchRes.data.trim().length > 0) {
+                            return fetchRes.data;
+                        }
+                    }
+                } else {
+                    console.log(`[WebUntis] No polling job returned yet (hasRunningJobs=${pollingData?.hasRunningJobs}). Waiting...`);
+                }
+
+                console.log(`[WebUntis] ${label} not ready yet. Waiting ${delay / 1000}s...`);
+            } catch (err) {
+                const pollErr = formatAxiosError(err, `[WebUntis] Polling ${label} failed on attempt ${attempt}`);
+                console.error(pollErr);
+                if (err.response?.data) {
+                    console.error('[WebUntis] Poll error response data:', err.response.data);
+                }
+                throw new Error(pollErr);
+            }
+        }
+
+        throw new Error(`WebUntis ${label} did not become ready after ${maxAttempts} attempts.`);
     }
 
     async readIdentities() {
@@ -82,19 +174,46 @@ class WebUntisDomain extends ManagableDomain {
         try {
             return await this._fetchStudentReport(client);
         } catch (e) {
-            // If the existing session is stale, retry with a fresh login
-            if (this.authClient && (e.message.includes('400') || e.message.includes('403') || e.message.includes('401'))) {
-                console.log('[WebUntis] Re-authenticating...');
+            // If the existing session is stale, retry with a fresh login (only on 401/403)
+            const isAuthErr = e.response?.status === 401 || e.response?.status === 403 || e.message?.includes('401') || e.message?.includes('403');
+            if (this.authClient && isAuthErr) {
+                console.log('[WebUntis] Session expired (got 401/403). Re-authenticating...');
                 client = await this._login();
                 return await this._fetchStudentReport(client);
             }
-            throw e;
+            const formatted = formatAxiosError(e, 'WebUntis readIdentities error');
+            console.error(formatted);
+            throw new Error(formatted);
         }
     }
 
     async _login() {
+        console.log(`[WebUntis] Authenticating user '${this.user}' at ${this.url}...`);
         const jar = new CookieJar();
-        const client = wrapper(axios.create({ jar, timeout: 5000 }));
+        const client = wrapper(axios.create({ jar, timeout: 10000 }));
+
+        client.interceptors.request.use(req => {
+            console.log(`[WebUntis HTTP Request] ${req.method?.toUpperCase()} ${req.url}`);
+            return req;
+        });
+
+        client.interceptors.response.use(
+            res => res,
+            err => {
+                const method = (err.config?.method || 'UNKNOWN').toUpperCase();
+                const url = err.config?.url || 'UNKNOWN_URL';
+                const status = err.response?.status;
+                const statusText = err.response?.statusText || '';
+                console.error(`[WebUntis HTTP Error] ${method} ${url} -> HTTP ${status || 'ERR'} ${statusText} (${err.message})`);
+                if (err.response?.data) {
+                    const dataPreview = typeof err.response.data === 'object'
+                        ? JSON.stringify(err.response.data)
+                        : String(err.response.data).substring(0, 500);
+                    console.error(`[WebUntis HTTP Error Body] ${dataPreview}`);
+                }
+                return Promise.reject(err);
+            }
+        );
 
         let token = '';
         if (this.secret) {
@@ -111,37 +230,96 @@ class WebUntisDomain extends ManagableDomain {
 
         // WebUntis requires initial GET for JSESSIONID before POSTing spring security check.
         // The school parameter must be present on this initial request to bind the session.
-        const initUrl = this.school ? `${this.url}?school=${this.school}` : this.url;
+        const initUrl = this.school
+            ? `${this.url}index.do?school=${encodeURIComponent(this.school)}`
+            : `${this.url}index.do`;
+        console.log(`[WebUntis] Initial session request: GET ${initUrl}`);
         await client.get(initUrl, { validateStatus: false });
 
         const params = new URLSearchParams();
+        if (this.school) params.append('school', this.school);
         params.append('j_username', this.user);
         params.append('j_password', this.password);
         if (token) params.append('token', token);
 
-        await client.post(this.url + this.loginPath, params, {
+        const loginUrl = this.url + this.loginPath;
+        console.log(`[WebUntis] Security check request: POST ${loginUrl}`);
+        const loginRes = await client.post(loginUrl, params, {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             maxRedirects: 0,
             validateStatus: false
         });
+        console.log(`[WebUntis] Login completed with status ${loginRes.status}`);
 
         // Keep the authenticated client for potential updates
         this.authClient = client;
         return client;
     }
 
+    /**
+     * Request a report from WebUntis, with automatic backoff retry if WebUntis reports
+     * that a previous report is still running/generating.
+     */
+    async _requestReport(client, url, label = 'report', maxAttempts = 5) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                console.log(`[WebUntis] Requesting ${label} (attempt ${attempt}/${maxAttempts}): GET ${url}`);
+                const genRes = await client.get(url, {
+                    headers: { Accept: 'application/json' }
+                });
+                console.log(`[WebUntis] ${label} response status: ${genRes.status}, data:`, typeof genRes.data === 'object' ? JSON.stringify(genRes.data) : String(genRes.data).substring(0, 500));
+                if (!genRes.data) {
+                    console.error(`[WebUntis] genRes.data is undefined for ${label}!`);
+                    throw new Error(`WebUntis did not return valid report data from GET ${url}.`);
+                }
+                return genRes;
+            } catch (err) {
+                const respStr = JSON.stringify(err.response?.data || '');
+                const isWaitingForPreviousReport = respStr.includes('Bitte warten Sie auf den vorigen Bericht') ||
+                    (err.response?.data?.errors?.some(e => e.code === '4' || (e.title && e.title.includes('vorigen Bericht'))));
+
+                if (isWaitingForPreviousReport && attempt < maxAttempts) {
+                    const waitTime = attempt * 5000; // 5s, 10s, 15s, 20s
+                    console.warn(`[WebUntis] ${label} blocked because a previous report is still generating in WebUntis. Waiting ${waitTime / 1000}s before retry (attempt ${attempt}/${maxAttempts})...`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                    continue;
+                }
+                throw err;
+            }
+        }
+    }
+
     async _fetchStudentReport(client) {
-        const genRes = await client.get(this.url + this.reportPath + '?' + this.fetchStudents);
-        if (!genRes.data || !genRes.data.data) {
-            console.error('WebUntis genRes.data.data is undefined!', genRes.data);
-            throw new Error('WebUntis did not return valid report data. Login or configuration issue possibly occurred.');
+        const reportUrl = this.url + this.reportPath + '?' + this.fetchStudents;
+        let genRes;
+        try {
+            genRes = await this._requestReport(client, reportUrl, 'Student report');
+        } catch (e) {
+            const formatted = formatAxiosError(e, 'WebUntis student report request failed');
+            console.error(formatted);
+            throw new Error(formatted);
         }
 
-        const data = genRes.data.data;
-        const messageId = data.messageId;
-        const reportParams = data.reportParams;
+        const data = genRes.data?.data;
+        const messageId = data?.messageId;
+        const reportParams = data?.reportParams || '';
+        const reportMeta = {
+            reportName: data?.reportName,
+            format: data?.format || 'csv'
+        };
 
-        const csv = await this._pollReport(client, messageId, reportParams, 'Student CSV');
+        if (data?.error) {
+            console.error('[WebUntis] Student report returned error:', genRes.data);
+            throw new Error(`WebUntis report error for Student report. Server response: ${JSON.stringify(genRes.data)}`);
+        }
+
+        if (messageId === undefined || messageId === null) {
+            console.error('[WebUntis] Student report returned no messageId:', genRes.data);
+            throw new Error(`WebUntis did not return messageId for Student report. Server response: ${JSON.stringify(genRes.data)}`);
+        }
+
+        console.log(`[WebUntis] Student report triggered (messageId: ${messageId}, finished: ${data?.finished}). Polling...`);
+        const csv = await this._pollReport(client, messageId, reportParams, 'Student CSV', reportMeta);
 
         const lines = csv.split('\n');
         const identities = [];
@@ -149,11 +327,16 @@ class WebUntisDomain extends ManagableDomain {
 
         // Parse headers
         let majorityColIdx = -1;
+        let medicalReportDutyColIdx = -1;
         if (lines.length > 0) {
             const headers = parseCsvLine(lines[0].trim());
             majorityColIdx = headers.indexOf('majority');
             if (majorityColIdx === -1) {
                 console.warn('[WebUntis Info] "majority" column missing in WebUntis CSV export headers. Automatic majority resolving disabled.');
+            }
+            medicalReportDutyColIdx = headers.indexOf('medicalReportDuty');
+            if (medicalReportDutyColIdx === -1) {
+                console.warn('[WebUntis Info] "medicalReportDuty" column missing in WebUntis CSV export headers.');
             }
         }
 
@@ -175,6 +358,12 @@ class WebUntisDomain extends ManagableDomain {
                 if (majorityColIdx !== -1 && cols.length > majorityColIdx) {
                     const val = cols[majorityColIdx] ? cols[majorityColIdx].toLowerCase() : '';
                     majorityFlag = (val === 'true');
+                }
+
+                let medicalReportDutyFlag = false;
+                if (medicalReportDutyColIdx !== -1 && cols.length > medicalReportDutyColIdx) {
+                    const val = cols[medicalReportDutyColIdx] ? cols[medicalReportDutyColIdx].toLowerCase() : '';
+                    medicalReportDutyFlag = (val === 'true' || val === '1' || val === 'ja');
                 }
 
                 if (lastName === 'Tester_Schüler' || accountId === 'Tester_Schüler') {
@@ -215,7 +404,8 @@ class WebUntisDomain extends ManagableDomain {
                         gender: normGender,
                         clazz,
                         birthday,
-                        majority: majorityFlag
+                        majority: majorityFlag,
+                        medicalReportDuty: medicalReportDutyFlag
                     }
                 ));
             }
@@ -335,8 +525,9 @@ class WebUntisDomain extends ManagableDomain {
             this.invalidate();
 
         } catch (e) {
-            console.error(`WebUntis changeIdentity error for ${identity.userId}:`, e.message);
-            throw e;
+            const formatted = formatAxiosError(e, `WebUntis changeIdentity error for ${identity.userId}`);
+            console.error(formatted);
+            throw new Error(formatted);
         }
     }
     async writeExitDates(map) {
@@ -362,76 +553,122 @@ class WebUntisDomain extends ManagableDomain {
     async readGuardians() {
         let client = this.authClient;
         if (!client) {
-            await this.readIdentities(); // Establishing auth client and internalIds
-            client = this.authClient;
+            console.log('[WebUntis] Establishing session for readGuardians...');
+            client = await this._login();
         }
 
         const fetchGuardiansConfig = config.webuntis?.fetchGuardians || 'name=LegalGuardian&format=csv&elementsForDate=false&klasseId=-1&schoolyearId=-1&searchString=&exitDateFilter=0&guardianFilterTypeId=-1&context=klasseId';
+        const requestUrl = this.url + this.reportPath + '?' + fetchGuardiansConfig;
 
-        try {
-            const genRes = await client.get(this.url + this.reportPath + '?' + fetchGuardiansConfig);
-            if (!genRes.data || !genRes.data.data) {
-                console.error('WebUntis genRes.data.data is undefined for readGuardians!', genRes.data);
-                throw new Error('WebUntis did not return valid report data. Login or configuration issue possibly occurred.');
+        const executeRead = async (activeClient) => {
+            const genRes = await this._requestReport(activeClient, requestUrl, 'Guardian report');
+
+            // If genRes.data is already CSV string (some reports return directly)
+            if (typeof genRes.data === 'string' && genRes.data.trim().length > 0 && !genRes.data.trim().startsWith('{')) {
+                console.log('[WebUntis] Guardian report returned CSV directly without polling.');
+                return this._parseGuardiansCsv(genRes.data);
             }
 
-            const data = genRes.data.data;
-            const messageId = data.messageId;
-            const reportParams = data.reportParams;
+            const data = genRes.data?.data;
+            const messageId = data?.messageId;
+            const reportParams = data?.reportParams || '';
+            const reportMeta = {
+                reportName: data?.reportName,
+                format: data?.format || 'csv'
+            };
 
-            const csv = await this._pollReport(client, messageId, reportParams, 'Guardian CSV');
+            if (data?.error) {
+                console.error('[WebUntis] Guardian report returned error:', genRes.data);
+                throw new Error(`WebUntis report error for Guardian report. Server response: ${JSON.stringify(genRes.data)}`);
+            }
 
-            const lines = csv.split('\n');
-            const guardiansMap = {};
-            const guardians = [];
+            if (messageId === undefined || messageId === null) {
+                console.error('[WebUntis] Guardian report returned no messageId:', genRes.data);
+                throw new Error(`WebUntis did not return messageId for Guardian report. Server response: ${JSON.stringify(genRes.data)}`);
+            }
 
-            for (let i = 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
-                const cols = parseCsvLine(line);
-                if (cols.length >= 14) {
-                    const id = cols[0]; // Guardian ID
-                    const lastName = cols[1];
-                    const firstName = cols[2];
-                    const email = cols[6] ? cols[6].toLowerCase() : '';
-                    const studentAccount = cols[15];
-                    const studentFirstName = cols[12];
-                    const studentLastName = cols[11];
+            console.log(`[WebUntis] Guardian report queued (messageId: ${messageId}, finished: ${data?.finished}, reportParams: "${reportParams}"). Polling...`);
+            const csv = await this._pollReport(activeClient, messageId, reportParams, 'Guardian CSV', reportMeta);
+            return this._parseGuardiansCsv(csv);
+        };
 
-                    if (!id) continue;
-
-                    let guardian = guardiansMap[id];
-                    if (!guardian) {
-                        guardian = {
-                            id: id,
-                            email: email,
-                            firstName: firstName,
-                            lastName: lastName,
-                            students: []
-                        };
-                        guardiansMap[id] = guardian;
-                        guardians.push(guardian);
+        try {
+            return await executeRead(client);
+        } catch (e) {
+            // Check if session is truly expired (401 Unauthorized or 403 Forbidden)
+            const isAuthErr = e.response?.status === 401 || e.response?.status === 403 || e.message?.includes('401') || e.message?.includes('403');
+            if (this.authClient && isAuthErr) {
+                console.warn(`[WebUntis] readGuardians encountered HTTP ${e.response?.status || 'auth failure'}. Re-authenticating and retrying...`);
+                try {
+                    client = await this._login();
+                    return await executeRead(client);
+                } catch (retryErr) {
+                    const formatted = formatAxiosError(retryErr, 'WebUntis readGuardians error (after re-authentication)');
+                    console.error(formatted);
+                    if (retryErr.response?.data) {
+                        console.error('[WebUntis] Full error response data:', retryErr.response.data);
                     }
-
-                    if (studentAccount) {
-                        // Only add if not duplicate
-                        if (!guardian.students.find(s => s.account === studentAccount)) {
-                            guardian.students.push({
-                                account: studentAccount,
-                                firstName: studentFirstName,
-                                lastName: studentLastName
-                            });
-                        }
-                    }
+                    throw new Error(formatted);
                 }
             }
 
-            return guardians;
-
-        } catch (e) {
-            console.error('WebUntis readGuardians error:', e.message);
-            throw new Error('WebUntis readGuardians error: ' + e.message);
+            const formatted = formatAxiosError(e, 'WebUntis readGuardians error');
+            console.error(formatted);
+            if (e.response?.data) {
+                console.error('[WebUntis] Full error response data:', e.response.data);
+            }
+            throw new Error(formatted);
         }
+    }
+
+    _parseGuardiansCsv(csv) {
+        const lines = (typeof csv === 'string') ? csv.split('\n') : [];
+        const guardiansMap = {};
+        const guardians = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            const cols = parseCsvLine(line);
+            if (cols.length >= 14) {
+                const id = cols[0]; // Guardian ID
+                const lastName = cols[1];
+                const firstName = cols[2];
+                const email = cols[6] ? cols[6].toLowerCase() : '';
+                const studentAccount = cols[15];
+                const studentFirstName = cols[12];
+                const studentLastName = cols[11];
+
+                if (!id) continue;
+
+                let guardian = guardiansMap[id];
+                if (!guardian) {
+                    guardian = {
+                        id: id,
+                        email: email,
+                        firstName: firstName,
+                        lastName: lastName,
+                        students: []
+                    };
+                    guardiansMap[id] = guardian;
+                    guardians.push(guardian);
+                }
+
+                if (studentAccount) {
+                    // Only add if not duplicate
+                    if (!guardian.students.find(s => s.account === studentAccount)) {
+                        guardian.students.push({
+                            account: studentAccount,
+                            firstName: studentFirstName,
+                            lastName: studentLastName
+                        });
+                    }
+                }
+            }
+        }
+
+        console.log(`[WebUntis] Successfully read ${guardians.length} guardians from WebUntis.`);
+        return guardians;
     }
 
     async changeGuardian(guardian, studentAccounts) {
@@ -442,6 +679,7 @@ class WebUntisDomain extends ManagableDomain {
         }
 
         const addGuardianPath = config.webuntis?.addGuardian || 'legalguardianform.do';
+        const guardianUrl = this.url + addGuardianPath;
 
         try {
             // Determine internal student IDs
@@ -459,7 +697,8 @@ class WebUntisDomain extends ManagableDomain {
             console.log(`[WebUntis Guardian] Final relatedStudentIds for ${guardian.email}: [${studentInternalIds.join(', ')}]`);
 
             // Fetch CSRF token
-            const indexRes = await client.get(this.url + addGuardianPath, { validateStatus: false });
+            console.log(`[WebUntis Guardian] Fetching CSRF form: GET ${guardianUrl}`);
+            const indexRes = await client.get(guardianUrl, { validateStatus: false });
             const htmlStr = typeof indexRes.data === 'string' ? indexRes.data : JSON.stringify(indexRes.data);
 
             let csrfMatch = htmlStr.match(/"csrfToken"\s*:\s*"([^"]+)"/) || htmlStr.match(/csrfToken":"([^"]+)"/);
@@ -495,7 +734,8 @@ class WebUntisDomain extends ManagableDomain {
 
             if (csrfToken) payload.append('_csrf', csrfToken);
 
-            const saveRes = await client.post(this.url + addGuardianPath, payload.toString(), {
+            console.log(`[WebUntis Guardian] Saving guardian ${guardian.email}: POST ${guardianUrl}`);
+            const saveRes = await client.post(guardianUrl, payload.toString(), {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-Requested-With': 'XMLHttpRequest',
@@ -506,18 +746,332 @@ class WebUntisDomain extends ManagableDomain {
             });
 
             if (saveRes.status >= 400 && saveRes.status !== 403 && saveRes.status !== 302) {
-                console.error(`WebUntis Guardian mutation failed. Status: ${saveRes.status}`);
+                console.error(`WebUntis Guardian mutation failed for ${guardian.email}. Status: ${saveRes.status}`);
             } else if (saveRes.status === 403) {
-                throw new Error('WebUntis Guardian access denied (403). Write privileges might be missing or CSRF invalid.');
+                throw new Error(`WebUntis Guardian access denied (403) for ${guardian.email}. Write privileges might be missing or CSRF invalid.`);
             }
 
             return { success: saveRes.status < 400 || saveRes.status === 302, status: saveRes.status };
 
         } catch (e) {
-            console.error(`WebUntis changeGuardian error for ${guardian.email}:`, e.message);
-            throw e;
+            const formatted = formatAxiosError(e, `WebUntis changeGuardian error for ${guardian.email}`);
+            console.error(formatted);
+            throw new Error(formatted);
         }
     }
+
+    async readUserGroups() {
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const res = await client.get(`${this.url}usergrouplist.do`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        const groups = [];
+        const seen = new Set();
+        const pattern = /loadContent\('usergroupform\?selId=(\d+)'\);void\(0\);"[^>]*>\s*([^<]+?)\s*<\/a>/g;
+
+        for (const match of html.matchAll(pattern)) {
+            const id = Number(match[1]);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            groups.push({ id, name: unescapeHtml(match[2]).trim() });
+        }
+        return groups;
+    }
+
+    async readUserGroup(id) {
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const res = await client.get(`${this.url}usergroupform.do?selId=${id}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+
+        const props = extractWidgetProps(html);
+        const fields = collectFormFields(html);
+        const byName = Object.fromEntries(fields);
+
+        const options = props.options || [];
+        const optionsById = new Map(options.map((o) => [o.id, o]));
+
+        return {
+            id: Number(byName.id ?? id),
+            name: byName.name ?? '',
+            lastUpdate: byName.lastUpdate ?? '0',
+            csrf: byName._csrf ?? '',
+            memberIds: props.selectedIds || [],
+            options,
+            optionsById,
+            memberFieldName: props.hiddenFieldName || 'userIds',
+            fields
+        };
+    }
+
+    async writeUserGroupMembers(group, memberIds, { name, allowEmpty = false } = {}) {
+        if (memberIds.length === 0 && group.memberIds?.length > 0 && !allowEmpty) {
+            throw new Error(`Refusing to empty group '${group.name}' — pass { allowEmpty: true } if intended.`);
+        }
+
+        const payload = new URLSearchParams();
+        for (const [key, value] of group.fields) {
+            if (!['id', 'lastUpdate', 'name', group.memberFieldName].includes(key)) {
+                payload.append(key, value);
+            }
+        }
+
+        payload.append('id', String(group.id));
+        payload.append('lastUpdate', String(group.lastUpdate));
+        payload.append('name', name ?? group.name);
+        payload.append('change', 'change');
+        for (const id of memberIds) {
+            payload.append(group.memberFieldName, String(id));
+        }
+
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const res = await client.post(`${this.url}usergroupform.do?selId=${group.id}`, payload.toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': group.csrf
+            }
+        });
+
+        const resBody = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        const errors = [...resBody.matchAll(/setError\('([^']+)','([^']+)'/g)]
+            .map(([, field, message]) => `${field}: ${message}`);
+        if (errors.length > 0) {
+            throw new Error(`WebUntis rejected the group update: ${errors.join('; ')}`);
+        }
+
+        let json = typeof res.data === 'object' ? res.data : null;
+        if (!json && typeof res.data === 'string' && res.data.trim().startsWith('{')) {
+            try { json = JSON.parse(res.data.trim()); } catch {}
+        }
+        if (json && json.success === false) {
+            const detail = (json.errors || []).map((e) => e.message || e.id || String(e)).join('; ');
+            throw new Error(`WebUntis rejected the group update${detail ? `: ${detail}` : ''}`);
+        }
+        if (res.status >= 400) {
+            throw new Error(`WebUntis group update failed with HTTP ${res.status}`);
+        }
+
+        return { status: res.status, memberCount: memberIds.length };
+    }
+
+    async getRestToken({ refresh = false } = {}) {
+        if (!refresh && this._bearerToken && Date.now() - (this._bearerTokenAt || 0) < 12 * 60 * 1000) {
+            return this._bearerToken;
+        }
+
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const tokenUrl = `${this.url}api/token/new`;
+        const res = await client.get(tokenUrl, {
+            headers: { Accept: '*/*' },
+            validateStatus: () => true
+        });
+
+        const token = (typeof res.data === 'string' ? res.data : JSON.stringify(res.data)).trim();
+        if (res.status !== 200 || !token.startsWith('eyJ')) {
+            throw new Error(`Could not obtain WebUntis REST token (HTTP ${res.status}): ${token.substring(0, 100)}`);
+        }
+
+        this._bearerToken = token;
+        this._bearerTokenAt = Date.now();
+        return token;
+    }
+
+    async requestRestJson(method, path, body, { retryOn401 = true } = {}) {
+        const token = await this.getRestToken();
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+        const fullUrl = path.startsWith('http') ? path : `${this.url}${cleanPath}`;
+
+        const res = await client.request({
+            method,
+            url: fullUrl,
+            data: body,
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+                ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
+            },
+            validateStatus: () => true
+        });
+
+        if (res.status === 401 && retryOn401) {
+            console.log('[WebUntis] REST token rejected (401) — renewing token...');
+            await this.getRestToken({ refresh: true });
+            return this.requestRestJson(method, path, body, { retryOn401: false });
+        }
+
+        return { status: res.status, data: res.data };
+    }
+
+    async readSchoolYearRange(now = new Date()) {
+        const today = now.toISOString().slice(0, 10);
+        try {
+            const res = await this.requestRestJson('GET', 'api/rest/view/v1/schoolyears');
+            const years = Array.isArray(res.data) ? res.data : [];
+            const current = years.find((y) => y.dateRange?.start <= today && today <= y.dateRange?.end);
+            if (current && current.dateRange?.start) {
+                return { start: current.dateRange.start, end: today };
+            }
+        } catch (err) {
+            console.warn(`[WebUntis] School years not available (${err.message}) — using fallback start`);
+        }
+        const year = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
+        return { start: `${year}-08-01`, end: today };
+    }
+
+    async readOpenPeriods(dateRange) {
+        const res = await this.requestRestJson('POST', 'api/rest/view/v1/classreg/open-periods', {
+            filter: 'TOPIC_OR_ABSENCE_OPEN',
+            dateRange: { start: dateRange.start, end: dateRange.end }
+        });
+        if (res.status !== 200 || !Array.isArray(res.data?.periods)) {
+            throw new Error(`Open periods could not be read (HTTP ${res.status}): ${JSON.stringify(res.data || '')}`);
+        }
+        return res.data.periods;
+    }
+
+    async writeLessonTopic(periodId, text = '---') {
+        const res = await this.requestRestJson('PUT', 'api/rest/view/v1/classreg/lesson-topics', {
+            forceBlock: false,
+            topic: { periodId, text, attachments: [] }
+        });
+        if (res.status !== 200 || !Array.isArray(res.data?.topics)) {
+            throw new Error(`Lesson topic rejected (HTTP ${res.status}): ${JSON.stringify(res.data || '')}`);
+        }
+        return res.data.topics;
+    }
+
+    async markAbsencesChecked(periodId) {
+        let client = this.authClient;
+        if (!client) client = await this._login();
+
+        const path = `classregpage.do?ttid=${periodId}&isBlockSelected=false&request.preventCache=${Date.now()}`;
+        const getRes = await client.get(`${this.url}${path}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const html = typeof getRes.data === 'string' ? getRes.data : JSON.stringify(getRes.data);
+        const fields = collectFormFields(html);
+        const csrf = Object.fromEntries(fields)._csrf || '';
+
+        const payload = new URLSearchParams();
+        for (const [k, v] of fields) {
+            payload.append(k, v);
+        }
+        payload.append('absencechecked', 'absencechecked');
+
+        const postRes = await client.post(`${this.url}classregpage.do?ttid=${periodId}&isBlockSelected=false`, payload.toString(), {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': csrf
+            }
+        });
+
+        let json = typeof postRes.data === 'object' ? postRes.data : null;
+        if (!json && typeof postRes.data === 'string' && postRes.data.trim().startsWith('{')) {
+            try { json = JSON.parse(postRes.data.trim()); } catch {}
+        }
+        if (!json || json.success !== true) {
+            throw new Error(`Absence check rejected (HTTP ${postRes.status}): ${JSON.stringify(postRes.data || '')}`);
+        }
+        const checked = Array.isArray(json.args?.[0]) ? json.args[0] : [periodId];
+        return checked;
+    }
+}
+
+const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+function unescapeHtml(text) {
+    return String(text).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, entity) => {
+        if (entity[0] === '#') {
+            const code = entity[1] === 'x' || entity[1] === 'X'
+                ? parseInt(entity.slice(2), 16)
+                : parseInt(entity.slice(1), 10);
+            return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        }
+        return HTML_ENTITIES[entity.toLowerCase()] ?? match;
+    });
+}
+
+function collectFormFields(html) {
+    const fields = [];
+    for (const match of html.matchAll(/<input\b([^>]*)>/gi)) {
+        const attrs = match[1];
+        const nameMatch = /\bname\s*=\s*"([^"]*)"/i.exec(attrs);
+        if (!nameMatch) continue;
+        const name = nameMatch[1];
+        const typeMatch = /\btype\s*=\s*"([^"]*)"/i.exec(attrs);
+        const type = (typeMatch ? typeMatch[1] : 'text').toLowerCase();
+        const valueMatch = /\bvalue\s*=\s*"([^"]*)"/i.exec(attrs);
+        const value = unescapeHtml(valueMatch ? valueMatch[1] : '');
+
+        if (type === 'checkbox' || type === 'radio') {
+            if (/\schecked\b/i.test(attrs)) fields.push([name, value]);
+        } else if (type !== 'submit' && type !== 'button') {
+            fields.push([name, value]);
+        }
+    }
+
+    for (const match of html.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)) {
+        const nameMatch = /\bname\s*=\s*"([^"]*)"/i.exec(match[1]);
+        if (!nameMatch) continue;
+        const name = nameMatch[1];
+        const body = match[2];
+        const selected =
+            /<option[^>]*\bselected\b[^>]*value="([^"]*)"/i.exec(body) ||
+            /<option[^>]*value="([^"]*)"[^>]*\bselected\b/i.exec(body) ||
+            /<option[^>]*value="([^"]*)"/i.exec(body);
+        fields.push([name, selected ? unescapeHtml(selected[1]) : '']);
+    }
+
+    return fields;
+}
+
+function extractWidgetProps(html) {
+    const start = html.indexOf('grupet/widget/FilteredMultiSelect');
+    if (start === -1) return {};
+
+    const attrMatch = /data-dojo-props="([\s\S]*?)"\s*(?:id=|name=|>)/.exec(html.slice(start));
+    if (!attrMatch) return {};
+    const props = unescapeHtml(attrMatch[1]);
+
+    const result = {};
+    const selected = /selectedIds:\s*\[([^\]]*)\]/.exec(props);
+    result.selectedIds = selected
+        ? selected[1]
+            .split(',')
+            .map((x) => x.trim())
+            .filter((x) => x !== '')
+            .map(Number)
+            .filter(Number.isFinite)
+        : [];
+
+    const options = /options:\s*(\[[\s\S]*?\]),\s*selectedIds/.exec(props);
+    if (options) {
+        try {
+            result.options = JSON.parse(options[1]);
+        } catch {
+            result.options = [];
+        }
+    }
+
+    const hidden = /hiddenFieldName:\s*'([^']+)'/.exec(props);
+    result.hiddenFieldName = hidden ? hidden[1] : 'userIds';
+
+    return result;
 }
 
 module.exports = new WebUntisDomain();
