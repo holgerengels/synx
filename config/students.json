@@ -249,7 +249,7 @@
       "titel": "Schulkonsole Kennwortablauf aufheben",
       "description": "Hebt das Kennwortablaufdatum für Schüler*innen im Active Directory/LDAP auf.",
       "class": "PaedmlFixPasswordExpirationTask",
-      "schedule": "10 7-18 * * *"
+      "schedule": "10 5 * * 0"
     },
     {
       "name": "rename-userid",

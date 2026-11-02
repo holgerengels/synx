@@ -153,7 +153,7 @@ class PaedmlFixPasswordExpirationTask extends Task {
                 const opts = {
                     filter: ldapConfig.userfilter || '(&(objectClass=user)(!(objectClass=computer)))',
                     scope: 'sub',
-                    attributes: ['dn', 'sAMAccountName', 'cn', 'userAccountControl', 'accountExpires']
+                    attributes: ['dn', 'sAMAccountName', 'cn', 'userAccountControl', 'accountExpires', 'pwdLastSet']
                 };
 
                 client.search(baseDN, opts, (err, searchRes) => {
@@ -185,13 +185,15 @@ class PaedmlFixPasswordExpirationTask extends Task {
                         const cn = (Array.isArray(obj.cn) ? obj.cn[0] : obj.cn || '').trim();
                         const userAccountControl = Array.isArray(obj.userAccountControl) ? obj.userAccountControl[0] : obj.userAccountControl;
                         const accountExpires = Array.isArray(obj.accountExpires) ? obj.accountExpires[0] : obj.accountExpires;
+                        const pwdLastSet = Array.isArray(obj.pwdLastSet) ? obj.pwdLastSet[0] : obj.pwdLastSet;
 
                         entries.push({
                             dn,
                             sAMAccountName,
                             cn,
                             userAccountControl,
-                            accountExpires
+                            accountExpires,
+                            pwdLastSet
                         });
                     });
 

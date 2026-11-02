@@ -251,6 +251,7 @@ describe('Schulkonsole and SchulkonsoleTeacher Re-authentication', () => {
         expect(createdClassPayload.name).toBe('10a'); // must be lowercase
         expect(createdStudentPayload).not.toBeNull();
         expect(createdStudentPayload.schoolClass).toBe('42');
+        expect(createdStudentPayload.passwordPolicy).toBe('2');
         expect(Schulkonsole.classes['10a']).toBe(42);
         expect(Schulkonsole.studentIds['max123']).toBe(999);
     });
