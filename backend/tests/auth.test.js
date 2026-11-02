@@ -104,6 +104,22 @@ describe('Auth Module', () => {
             });
         });
 
+        it('should support ldap configuration under settings.ldap', async () => {
+            const config = require('../src/config');
+            const originalServerLdap = config.settings.server.ldap;
+            delete config.settings.server.ldap;
+            config.settings.ldap = originalServerLdap;
+
+            try {
+                const result = await auth.login('testuser', 'correctpassword');
+                expect(result).not.toBeNull();
+                expect(result.token).toBeDefined();
+            } finally {
+                config.settings.server.ldap = originalServerLdap;
+                delete config.settings.ldap;
+            }
+        });
+
         it('should throw an error on LDAP connection error', async () => {
             process.env.MOCK_LDAP_CONN_ERROR = 'true';
             await expect(auth.login('testuser', 'pw')).rejects.toThrow('LDAP Connection Error: Mocked Connection Error');

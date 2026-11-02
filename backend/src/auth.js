@@ -52,18 +52,18 @@ const login = async (username, password, isPwa = true) => {
             return result;
         }
         
-        if (!settings.server || !settings.server.ldap) {
+        const ldapConfig = settings.ldap || (settings.server && settings.server.ldap);
+        if (!ldapConfig) {
             return null;
         }
     }
 
     // 2. LDAP Auth
-    if (!settings.server || !settings.server.ldap) {
-        console.error('[Auth] LDAP settings missing');
+    const ldapConfig = settings.ldap || (settings.server && settings.server.ldap);
+    if (!ldapConfig) {
+        console.error('[Auth] LDAP settings missing (settings.ldap)');
         return null;
     }
-
-    const ldapConfig = settings.server.ldap;
 
     return new Promise((resolve, reject) => {
         const client = ldap.createClient({ url: ldapConfig.url });

@@ -2,7 +2,7 @@ const EventEmitter = require('events');
 
 // Setup mock config before requiring task
 jest.mock('../../src/config', () => ({
-    ldap: {
+    paedml: {
         url: 'ldaps://mock-dc01:636',
         user: 'cn=Administrator,dc=test',
         password: 'secretpassword',
@@ -138,6 +138,21 @@ describe('PaedmlFixPasswordExpirationTask', () => {
         expect(mockSend).toHaveBeenCalledTimes(1);
 
         config.settings.devMode = false;
+    });
+
+    test('falls back to config.ldap if config.paedml is missing', async () => {
+        const config = require('../../src/config');
+        const paedmlConf = config.paedml;
+        delete config.paedml;
+        config.ldap = paedmlConf;
+
+        try {
+            const result = await task.execute();
+            expect(result.success).toBe(true);
+        } finally {
+            config.paedml = paedmlConf;
+            delete config.ldap;
+        }
     });
 
     test('format produces correct HTML messages', () => {

@@ -24,12 +24,12 @@ class PaedmlFixPasswordExpirationTask extends Task {
 
     async execute() {
         const devMode = devModeUtils.isDevMode();
-        const ldapConfig = config.ldap;
+        const ldapConfig = config.paedml || config.ldap;
 
         if (!ldapConfig || !ldapConfig.url) {
             return {
                 success: false,
-                error: 'LDAP configuration missing (config.ldap).'
+                error: 'LDAP configuration missing (config.paedml).'
             };
         }
 
