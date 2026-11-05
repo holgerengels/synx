@@ -45,9 +45,14 @@ class WebUntisGuardianSyncTask extends Task {
                 const reasons = [];
                 const missingStudents = studentAccounts.filter(acc => !untisStudentAccounts.includes(acc));
                 
-                if (guardian.lastName !== untisG.lastName || guardian.firstName !== untisG.firstName) {
+                const asvFirst = (guardian.firstName || '').trim();
+                const untisFirst = (untisG.firstName || '').trim();
+                const asvLast = (guardian.lastName || '').trim();
+                const untisLast = (untisG.lastName || '').trim();
+
+                if (asvLast !== untisLast || asvFirst !== untisFirst) {
                     needsUpdate = true;
-                    reasons.push(`Name: ASV="${guardian.firstName} ${guardian.lastName}" vs WebUntis="${untisG.firstName} ${untisG.lastName}"`);
+                    reasons.push(`Name: ASV="${asvFirst} ${asvLast}" vs WebUntis="${untisFirst} ${untisLast}"`);
                 }
                 if (missingStudents.length > 0) {
                     needsUpdate = true;
@@ -72,7 +77,10 @@ class WebUntisGuardianSyncTask extends Task {
 
         for (const req of addsToProcess) {
             try {
-                await untis.changeGuardian(req.guardian, req.studentAccounts);
+                const res = await untis.changeGuardian(req.guardian, req.studentAccounts);
+                if (res && res.success === false) {
+                    throw new Error(`WebUntis mutation returned success=false (status ${res.status})`);
+                }
                 addedLog.push({ id: req.guardian.email, new: req.guardian, newStudents: req.studentAccounts });
             } catch (e) {
                 errorLog.push({ id: req.guardian.email, message: `Add Error: ${e.message}` });
@@ -81,7 +89,10 @@ class WebUntisGuardianSyncTask extends Task {
 
         for (const req of updatesToProcess) {
             try {
-                await untis.changeGuardian(req.guardian, req.studentAccounts);
+                const res = await untis.changeGuardian(req.guardian, req.studentAccounts);
+                if (res && res.success === false) {
+                    throw new Error(`WebUntis mutation returned success=false (status ${res.status})`);
+                }
                 // We should theoretically find the old guardian object in untisMap
                 const oldGuardian = untisMap[req.guardian.email];
                 updatedLog.push({ id: req.guardian.email, old: oldGuardian, new: req.guardian, newStudents: req.studentAccounts });

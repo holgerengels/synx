@@ -24,6 +24,7 @@ client/**/*.js
 client/**/*.map
 nginx/
 jetty/
+stuff/
 
 # Tests
 coverage/
