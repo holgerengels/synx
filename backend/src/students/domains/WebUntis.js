@@ -696,6 +696,10 @@ class WebUntisDomain extends ManagableDomain {
             }
             console.log(`[WebUntis Guardian] Final relatedStudentIds for ${guardian.email}: [${studentInternalIds.join(', ')}]`);
 
+            if (studentAccounts.length > 0 && studentInternalIds.length === 0) {
+                throw new Error(`Keine WebUntis-Schüler-ID für [${studentAccounts.join(', ')}] gefunden. Erziehungsberechtigter kann nicht verknüpft werden.`);
+            }
+
             // Fetch CSRF token
             console.log(`[WebUntis Guardian] Fetching CSRF form: GET ${guardianUrl}`);
             const indexRes = await client.get(guardianUrl, { validateStatus: false });
@@ -745,13 +749,27 @@ class WebUntisDomain extends ManagableDomain {
                 maxRedirects: 0
             });
 
+            if (saveRes.status === 200 && typeof saveRes.data === 'string') {
+                let errorMsg = '';
+                const errorMatch = saveRes.data.match(/this\.setError\([^,]+,\s*'([^']+)'/);
+                if (errorMatch) {
+                    errorMsg = errorMatch[1];
+                } else {
+                    const errDiv = saveRes.data.match(/<div[^>]*class="[^"]*error[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+                    if (errDiv) {
+                        errorMsg = errDiv[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                    }
+                }
+                throw new Error(`WebUntis Validierungsfehler für ${guardian.email}: ${errorMsg || 'Formular nicht gespeichert (HTTP 200 ohne Redirect)'}`);
+            }
+
             if (saveRes.status >= 400 && saveRes.status !== 403 && saveRes.status !== 302) {
-                console.error(`WebUntis Guardian mutation failed for ${guardian.email}. Status: ${saveRes.status}`);
+                throw new Error(`WebUntis Guardian mutation failed for ${guardian.email}. Status: ${saveRes.status}`);
             } else if (saveRes.status === 403) {
                 throw new Error(`WebUntis Guardian access denied (403) for ${guardian.email}. Write privileges might be missing or CSRF invalid.`);
             }
 
-            return { success: saveRes.status < 400 || saveRes.status === 302, status: saveRes.status };
+            return { success: saveRes.status === 302 || (saveRes.status < 400 && saveRes.status !== 200), status: saveRes.status };
 
         } catch (e) {
             const formatted = formatAxiosError(e, `WebUntis changeGuardian error for ${guardian.email}`);

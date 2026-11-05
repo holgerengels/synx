@@ -93,7 +93,7 @@ describe('WebUntisGuardianSyncTask', () => {
         );
     });
 
-    it('adds new guardians and tracks errors if mutation fails', async () => {
+    it('adds new guardians and tracks errors if mutation throws', async () => {
         mockAsv.readGuardians.mockResolvedValue([
             {
                 id: null,
@@ -113,5 +113,27 @@ describe('WebUntisGuardianSyncTask', () => {
         expect(result.details.added).toHaveLength(0);
         expect(result.details.errors).toHaveLength(1);
         expect(result.details.errors[0].message).toContain('WebUntis failed');
+    });
+
+    it('records error when changeGuardian returns success: false', async () => {
+        mockAsv.readGuardians.mockResolvedValue([
+            {
+                id: null,
+                email: 'new@example.com',
+                firstName: 'Max',
+                lastName: 'Muster',
+                students: [{ account: 'muster.max' }]
+            }
+        ]);
+        mockUntis.readGuardians.mockResolvedValue([]);
+        mockUntis.changeGuardian.mockResolvedValue({ success: false, status: 200 });
+
+        const result = await task.execute();
+
+        expect(result.success).toBe(true);
+        expect(result.details.totalAdditionsDiscovered).toBe(1);
+        expect(result.details.added).toHaveLength(0);
+        expect(result.details.errors).toHaveLength(1);
+        expect(result.details.errors[0].message).toContain('success=false');
     });
 });
